@@ -1,7 +1,8 @@
-bf: main.cpp 
-	g++ -Ofast main.cpp -o bf
-
 build: bf
+
+bf: main.cpp 
+	g++ -Ofast -std=c++20 main.cpp -o ./bf
+
 
 clean:
 	rm bf

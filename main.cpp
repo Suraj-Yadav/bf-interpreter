@@ -3,11 +3,12 @@
 #include <stack>
 #include <vector>
 
-class Tape {
-	using T = unsigned char;
-	static_assert(sizeof(T) == 1);
+using DATA_TYPE = unsigned char;
 
-	std::vector<T> right, left;
+class Tape {
+	static_assert(sizeof(DATA_TYPE) == 1);
+
+	std::vector<DATA_TYPE> right, left;
 	int index = 0;
 
    public:
@@ -23,7 +24,17 @@ class Tape {
 		std::cout << '\n';
 	}
 
-	T& get() { return operator[](index); }
+	DATA_TYPE& get() { return operator[](index); }
+
+	void move(int delta) {
+		index += delta;
+		if (index >= 0) {
+			while (index >= right.size()) { right.push_back(0); }
+		} else {
+			auto i = -index - 1;
+			while (i >= left.size()) { left.push_back(0); }
+		}
+	}
 
 	void moveRight() {
 		index++;
@@ -36,7 +47,7 @@ class Tape {
 		if (i == left.size()) { left.push_back(0); }
 	}
 
-	T& operator[](int index) {
+	DATA_TYPE& operator[](int index) {
 		if (index >= 0) { return right[index]; }
 		index = -index - 1;
 		return left[index];
@@ -59,34 +70,125 @@ class Jumps {
 
 constexpr std::string_view ALLOWED_CHARS = "><+-[].,$";
 
+enum Inst_Codes {
+	NO_OP = 0,
+	TAPE_M,	 // Tape Movement
+	INCR_C,	 // Increment by constant
+	INCR_R,	 // Increment by reference
+	WRITE,
+	READ,
+	JUMP_C,	 // Jump to closing bracket
+	JUMP_O,	 // Jump to opening bracket
+	HALT,
+};
+
+struct Instruction {
+	Inst_Codes code = Inst_Codes::NO_OP;
+	int lRef = 0, rRef = 0;
+	int value = 0;
+};
+
+// #define LOG_INST 1
+
+#ifdef LOG_INST
+std::ostream& operator<<(std::ostream& os, const Instruction& a) {
+	constexpr auto InstNames = std::to_array(
+		{"NO_OP", "TAPE_M", "INCR_C", "INCR_R", "WRITE", "READ", "JUMP_C",
+		 "JUMP_O", "HALT"});
+
+	static_assert((Inst_Codes::HALT + 1) == InstNames.size());
+
+	return os << InstNames[a.code] << "\t" << a.lRef << " = " << a.rRef << ", "
+			  << a.value;
+}
+#endif
+
+bool operator<(const Instruction& a, const Instruction& b) {
+	if (a.code != b.code) { return a.code < b.code; }
+	return a.lRef < b.lRef;
+}
+
 class Program {
-	std::string program;
+	std::vector<Instruction> program;
 	int p = 0;
 	std::ifstream input;
 	std::stack<int> stack;
 	Jumps jumps;
 
-   public:
-	Program(const std::string& file) : input(file) {}
+#ifdef LOG_INST
+	std::ofstream original("/tmp/orig.bfas");
+#endif
 
-	char get() {
-		while (p >= program.size()) {
+	void addInstruction(Instruction inst) {
+		program.push_back(inst);
+		jumps.add();
+#ifdef LOG_INST
+		original << inst << "\n";
+#endif
+	}
+
+	void parse() {
+		while (true) {
 			auto ch = '\0';
-			if (!(input >> ch)) { return ch; }
-			if (ALLOWED_CHARS.find(ch) == std::string_view::npos) { continue; }
-			program.push_back(ch);
-			jumps.add();
-			if (ch == '[') {
-				stack.push(p);
-				jumps.addLeft(p);
+			if (!(input >> ch)) {
+				addInstruction({HALT});
+				return;
 			}
-			if (ch == ']') {
-				jumps.addRight(stack.top(), p);
-				stack.pop();
+			switch (ch) {
+				case '>': {
+					addInstruction({Inst_Codes::TAPE_M, 0, 0, +1});
+					break;
+				}
+				case '<': {
+					addInstruction({Inst_Codes::TAPE_M, 0, 0, -1});
+					break;
+				}
+				case '+': {
+					addInstruction({Inst_Codes::INCR_C, 0, 0, +1});
+					break;
+				}
+				case '-': {
+					addInstruction({Inst_Codes::INCR_C, 0, 0, -1});
+					break;
+				}
+				case '.': {
+					addInstruction({Inst_Codes::WRITE, 0, 0, 0});
+					break;
+				}
+				case ',': {
+					addInstruction({Inst_Codes::READ, 0, 0, 0});
+					break;
+				}
+				case '[': {
+					int pos = static_cast<int>(program.size());
+					stack.push(pos);
+					jumps.addLeft(pos);
+					addInstruction({Inst_Codes::JUMP_C, 0, 0, 0});
+					break;
+				}
+				case ']': {
+					int pos = static_cast<int>(program.size());
+					jumps.addRight(stack.top(), pos);
+					stack.pop();
+					addInstruction({Inst_Codes::JUMP_O, 0, 0, 0});
+					break;
+				}
+				default:
+					break;
 			}
 		}
-		return program[p];
 	}
+
+   public:
+	Program(const std::string& file) : input(file) { parse(); }
+	~Program() {
+#ifdef LOG_INST
+		std::ofstream optimized("/tmp/actual.bfas");
+		for (const auto& i : program) { optimized << i << "\n"; }
+#endif
+	}
+
+	Instruction get() { return program[p]; }
 
 	void next() { p++; }
 
@@ -105,44 +207,34 @@ int main(int argc, char* argv[]) {
 	Tape tape;
 	std::string file = "./input.txt";
 	if (argc > 1) { file = argv[1]; }
+
 	Program p(file);
 
 	while (true) {
-		auto ch = p.get();
-		if (ch == 0) { break; }
-		// std::cout << ch << "\n";
-		switch (ch) {
-			case '>': {
-				tape.moveRight();
+		const auto inst = p.get();
+		if (inst.code == Inst_Codes::HALT) { break; }
+		switch (inst.code) {
+			case TAPE_M: {
+				tape.move(inst.value);
 				p.next();
 				break;
 			}
-			case '<': {
-				tape.moveLeft();
+			case INCR_C: {
+				tape.get() += inst.value;
 				p.next();
 				break;
 			}
-			case '+': {
-				tape.get()++;
-				p.next();
-				break;
-			}
-			case '-': {
-				tape.get()--;
-				p.next();
-				break;
-			}
-			case '.': {
+			case WRITE: {
 				std::cout << tape.get();
 				p.next();
 				break;
 			}
-			case ',': {
+			case READ: {
 				std::cin >> tape.get();
 				p.next();
 				break;
 			}
-			case '[': {
+			case JUMP_C: {
 				if (tape.get() == 0) {
 					p.jump();
 				} else {
@@ -150,7 +242,7 @@ int main(int argc, char* argv[]) {
 				}
 				break;
 			}
-			case ']': {
+			case JUMP_O: {
 				if (tape.get() != 0) {
 					p.jump();
 				} else {
@@ -158,12 +250,9 @@ int main(int argc, char* argv[]) {
 				}
 				break;
 			}
-			case '$': {
-				tape.print();
-				p.next();
-				break;
-			}
-			default:
+			case HALT:
+			case NO_OP:
+			case INCR_R:
 				p.next();
 				break;
 		}
