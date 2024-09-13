@@ -162,15 +162,15 @@ class Program {
 				case '[': {
 					int pos = static_cast<int>(program.size());
 					stack.push(pos);
-					jumps.addLeft(pos);
 					addInstruction({Inst_Codes::JUMP_C, 0, 0, 0});
+					jumps.addLeft(pos);
 					break;
 				}
 				case ']': {
 					int pos = static_cast<int>(program.size());
+					addInstruction({Inst_Codes::JUMP_O, 0, 0, 0});
 					jumps.addRight(stack.top(), pos);
 					stack.pop();
-					addInstruction({Inst_Codes::JUMP_O, 0, 0, 0});
 					break;
 				}
 				default:
