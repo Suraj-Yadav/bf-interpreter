@@ -1,3 +1,4 @@
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <stack>
@@ -54,22 +55,6 @@ class Tape {
 	}
 };
 
-class Jumps {
-	std::vector<int> jumps;
-
-   public:
-	void add() { jumps.push_back(-1); }
-	void addLeft(int l) {}
-	void addRight(int l, int r) {
-		jumps[r] = l;
-		jumps[l] = r;
-	}
-
-	int getJump(int p) { return jumps[p]; }
-};
-
-constexpr std::string_view ALLOWED_CHARS = "><+-[].,$";
-
 enum Inst_Codes {
 	NO_OP = 0,
 	TAPE_M,	 // Tape Movement
@@ -113,18 +98,34 @@ class Program {
 	int p = 0;
 	std::ifstream input;
 	std::stack<int> stack;
-	Jumps jumps;
 
 #ifdef LOG_INST
-	std::ofstream original("/tmp/orig.bfas");
+	std::ofstream original = std::ofstream("/tmp/orig.bfas");
 #endif
+
+	void aggregate() {
+		if (program.size() < 2) { return; }
+		auto& b = program.back();
+		auto& a = program[program.size() - 2];
+		if (a.code == b.code && a.code == Inst_Codes::INCR_C &&
+			a.lRef == b.lRef) {
+			a.value += b.value;
+			program.pop_back();
+			return;
+		}
+		if (a.code == b.code && a.code == Inst_Codes::TAPE_M) {
+			a.value += b.value;
+			program.pop_back();
+			return;
+		}
+	}
 
 	void addInstruction(Instruction inst) {
 		program.push_back(inst);
-		jumps.add();
 #ifdef LOG_INST
 		original << inst << "\n";
 #endif
+		aggregate();
 	}
 
 	void parse() {
@@ -163,13 +164,12 @@ class Program {
 					int pos = static_cast<int>(program.size());
 					stack.push(pos);
 					addInstruction({Inst_Codes::JUMP_C, 0, 0, 0});
-					jumps.addLeft(pos);
 					break;
 				}
 				case ']': {
 					int pos = static_cast<int>(program.size());
-					addInstruction({Inst_Codes::JUMP_O, 0, 0, 0});
-					jumps.addRight(stack.top(), pos);
+					addInstruction({Inst_Codes::JUMP_O, 0, 0, stack.top()});
+					program[stack.top()].value = pos;
 					stack.pop();
 					break;
 				}
@@ -192,14 +192,7 @@ class Program {
 
 	void next() { p++; }
 
-	void jump() {
-		auto tempP = p;
-		while (jumps.getJump(tempP) == -1) {
-			get();
-			next();
-		}
-		p = jumps.getJump(tempP);
-	}
+	void jump() { p = program[p].value; }
 };
 
 int main(int argc, char* argv[]) {
