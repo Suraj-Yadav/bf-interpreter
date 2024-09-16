@@ -9,11 +9,7 @@ using DATA_TYPE = unsigned char;
 
 class Tape {
 	static_assert(sizeof(DATA_TYPE) == 1);
-	struct Cell {
-		DATA_TYPE val = 0;
-		bool isConst = true;
-	};
-	std::vector<Cell> right, left;
+	std::vector<DATA_TYPE> right, left;
 	int index = 0;
 
    public:
@@ -23,17 +19,14 @@ class Tape {
 		std::cout << "index = " << index << '\n';
 		while (!left.empty()) {
 			const auto& e = left.back();
-			std::cout << (e.isConst ? '*' : ' ') << (int)e.val << "\t";
+			std::cout << (int)e << "\t";
 			left.pop_back();
 		}
-		for (auto& e : right) {
-			std::cout << (e.isConst ? '*' : ' ') << (int)e.val << "\t";
-		}
+		for (auto& e : right) { std::cout << (int)e << "\t"; }
 		std::cout << '\n';
 	}
 
-	DATA_TYPE& get(int delta = 0) { return operator[](index + delta).val; }
-	bool& isConst(int delta = 0) { return operator[](index + delta).isConst; }
+	DATA_TYPE& get(int delta = 0) { return operator[](index + delta); }
 
 	void expand(int ind) {
 		if (ind >= 0) {
@@ -55,7 +48,7 @@ class Tape {
 
 	void moveLeft() { move(-1); }
 
-	Cell& operator[](int index) {
+	DATA_TYPE& operator[](int index) {
 		expand(index);
 		if (index >= 0) { return right[index]; }
 		index = -index - 1;
@@ -150,7 +143,6 @@ void run(
 			}
 			case READ: {
 				if constexpr (actuallyRun) { std::cin >> tape.get(); }
-				tape.isConst() = false;
 				break;
 			}
 			case JUMP_C: {
@@ -173,11 +165,6 @@ void run(
 			}
 			case INCR_R: {
 				if constexpr (actuallyRun) {
-					if (inst.lRef == inst.rRef && inst.value == -1) {
-						tape.isConst(inst.lRef) = true;
-					} else {
-						tape.isConst(inst.lRef) = tape.isConst(inst.rRef);
-					}
 					tape.get(inst.lRef) += inst.value * tape.get(inst.rRef);
 				}
 				break;
