@@ -75,6 +75,7 @@ enum Inst_Codes {
 	READ,
 	JUMP_C,	 // Jump to closing bracket
 	JUMP_O,	 // Jump to opening bracket
+	DEBUG,
 	HALT,
 };
 
@@ -84,13 +85,37 @@ struct Instruction {
 	int value = 0;
 };
 
+Instruction getInstruction(char ch) {
+	switch (ch) {
+		case '>':
+			return {Inst_Codes::TAPE_M, 0, 0, +1};
+		case '<':
+			return {Inst_Codes::TAPE_M, 0, 0, -1};
+		case '+':
+			return {Inst_Codes::INCR_C, 0, 0, +1};
+		case '-':
+			return {Inst_Codes::INCR_C, 0, 0, -1};
+		case '.':
+			return {Inst_Codes::WRITE, 0, 0, 0};
+		case ',':
+			return {Inst_Codes::READ, 0, 0, 0};
+		case '[':
+			return {Inst_Codes::JUMP_C, 0, 0, 0};
+		case ']':
+			return {Inst_Codes::JUMP_O, 0, 0, 0};
+		case '$':
+			return {Inst_Codes::DEBUG, 0, 0, 0};
+	}
+	return {Inst_Codes::NO_OP, 0, 0, 0};
+}
+
 #define LOG_INST 1
 
 #ifdef LOG_INST
 std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 	constexpr auto InstNames = std::to_array(
 		{"NO_OP", "TAPE_M", "INCR_C", "INCR_R", "WRITE", "READ", "JUMP_C",
-		 "JUMP_O", "HALT"});
+		 "JUMP_O", "DEBUG", "HALT"});
 
 	static_assert((Inst_Codes::HALT + 1) == InstNames.size());
 
@@ -104,8 +129,9 @@ bool operator<(const Instruction& a, const Instruction& b) {
 	return a.lRef < b.lRef;
 }
 
+template <bool actuallyRun>
 void run(
-	Tape& tape, bool enableIO, std::vector<Instruction>::const_iterator begin,
+	Tape& tape, std::vector<Instruction>::const_iterator begin,
 	std::vector<Instruction>::const_iterator end) {
 	for (auto itr = begin; itr != end; itr++) {
 		const auto& inst = *itr;
@@ -119,36 +145,45 @@ void run(
 				break;
 			}
 			case WRITE: {
-				if (enableIO) { std::cout << tape.get(); }
+				if constexpr (actuallyRun) { std::cout << tape.get(); }
 				break;
 			}
 			case READ: {
-				if (enableIO) { std::cin >> tape.get(); }
+				if constexpr (actuallyRun) { std::cin >> tape.get(); }
 				tape.isConst() = false;
 				break;
 			}
 			case JUMP_C: {
-				if (tape.get() == 0) {
-					itr += inst.value;
-					itr--;
+				if constexpr (actuallyRun) {
+					if (tape.get() == 0) {
+						itr += inst.value;
+						itr--;
+					}
 				}
 				break;
 			}
 			case JUMP_O: {
-				if (tape.get() != 0) {
-					itr += inst.value;
-					itr--;
+				if constexpr (actuallyRun) {
+					if (tape.get() != 0) {
+						itr += inst.value;
+						itr--;
+					}
 				}
 				break;
 			}
 			case INCR_R: {
-				if (inst.lRef == inst.rRef && inst.value == -1) {
-					tape.isConst(inst.lRef) = true;
-				} else {
-					tape.isConst(inst.lRef) = tape.isConst(inst.rRef);
+				if constexpr (actuallyRun) {
+					if (inst.lRef == inst.rRef && inst.value == -1) {
+						tape.isConst(inst.lRef) = true;
+					} else {
+						tape.isConst(inst.lRef) = tape.isConst(inst.rRef);
+					}
+					tape.get(inst.lRef) += inst.value * tape.get(inst.rRef);
 				}
-				tape.get(inst.lRef) += inst.value * tape.get(inst.rRef);
 				break;
+			}
+			case DEBUG: {
+				if constexpr (actuallyRun) { tape.print(); }
 			}
 			case NO_OP:
 				break;
@@ -178,6 +213,15 @@ class Program {
 		}
 	}
 
+	// Determine loop count (i) by solving (a + d * i) mod 256 = 0 (mod 256)
+	static bool solveForLoopCount(DATA_TYPE a, DATA_TYPE d, DATA_TYPE& i) {
+		for (i = 1; i <= std::numeric_limits<DATA_TYPE>::max(); i++) {
+			a += d;
+			if (a == 0) { return true; }
+		}
+		return false;
+	}
+
 	void parse(const std::string& file) {
 		std::ifstream input(file);
 		std::stack<int> stack;
@@ -188,43 +232,12 @@ class Program {
 
 		while (true) {
 			auto ch = '\0';
-			Instruction inst{NO_OP};
-			if (!(input >> ch)) { inst = {Inst_Codes::HALT, 0, 0, 0}; }
-			switch (ch) {
-				case '>': {
-					inst = {Inst_Codes::TAPE_M, 0, 0, +1};
-					break;
-				}
-				case '<': {
-					inst = {Inst_Codes::TAPE_M, 0, 0, -1};
-					break;
-				}
-				case '+': {
-					inst = {Inst_Codes::INCR_C, 0, 0, +1};
-					break;
-				}
-				case '-': {
-					inst = {Inst_Codes::INCR_C, 0, 0, -1};
-					break;
-				}
-				case '.': {
-					inst = {Inst_Codes::WRITE, 0, 0, 0};
-					break;
-				}
-				case ',': {
-					inst = {Inst_Codes::READ, 0, 0, 0};
-					break;
-				}
-				case '[': {
-					inst = {Inst_Codes::JUMP_C, 0, 0, 0};
-					break;
-				}
-				case ']': {
-					inst = {Inst_Codes::JUMP_O, 0, 0, 0};
-					break;
-				}
-				default:
-					break;
+			Instruction inst;
+
+			if (input >> ch) {
+				inst = getInstruction(ch);
+			} else {
+				inst = {Inst_Codes::HALT, 0, 0, 0};
 			}
 
 			if (inst.code != NO_OP) {
@@ -269,7 +282,7 @@ int main(int argc, char* argv[]) {
 
 	const auto& code = p.instructions();
 
-	run(tape, true, code.cbegin(), code.cend());
+	run<true>(tape, code.cbegin(), code.cend());
 
 	return 0;
 }
