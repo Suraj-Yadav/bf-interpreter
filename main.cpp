@@ -122,7 +122,6 @@ bool operator<(const Instruction& a, const Instruction& b) {
 	return a.lRef < b.lRef;
 }
 
-template <bool actuallyRun>
 void run(
 	Tape& tape, std::vector<Instruction>::const_iterator begin,
 	std::vector<Instruction>::const_iterator end) {
@@ -138,39 +137,33 @@ void run(
 				break;
 			}
 			case WRITE: {
-				if constexpr (actuallyRun) { std::cout << tape.get(); }
+				std::cout << tape.get();
 				break;
 			}
 			case READ: {
-				if constexpr (actuallyRun) { std::cin >> tape.get(); }
+				std::cin >> tape.get();
 				break;
 			}
 			case JUMP_C: {
-				if constexpr (actuallyRun) {
-					if (tape.get() == 0) {
-						itr += inst.value;
-						itr--;
-					}
+				if (tape.get() == 0) {
+					itr += inst.value;
+					itr--;
 				}
 				break;
 			}
 			case JUMP_O: {
-				if constexpr (actuallyRun) {
-					if (tape.get() != 0) {
-						itr += inst.value;
-						itr--;
-					}
+				if (tape.get() != 0) {
+					itr += inst.value;
+					itr--;
 				}
 				break;
 			}
 			case INCR_R: {
-				if constexpr (actuallyRun) {
-					tape.get(inst.lRef) += inst.value * tape.get(inst.rRef);
-				}
+				tape.get(inst.lRef) += inst.value * tape.get(inst.rRef);
 				break;
 			}
 			case DEBUG: {
-				if constexpr (actuallyRun) { tape.print(); }
+				tape.print();
 			}
 			case NO_OP:
 				break;
@@ -180,7 +173,17 @@ void run(
 	}
 }
 
+// Determine loop count (i) by solving (a + d * i) mod 256 = 0 (mod 256)
+bool solveForLoopCount(DATA_TYPE a, DATA_TYPE d, DATA_TYPE& i) {
+	for (i = 1; i <= std::numeric_limits<DATA_TYPE>::max(); i++) {
+		a += d;
+		if (a == 0) { return true; }
+	}
+	return false;
+}
+
 class Program {
+	bool failed = false;
 	std::vector<Instruction> program;
 
 	void aggregate() {
@@ -200,17 +203,12 @@ class Program {
 		}
 	}
 
-	// Determine loop count (i) by solving (a + d * i) mod 256 = 0 (mod 256)
-	static bool solveForLoopCount(DATA_TYPE a, DATA_TYPE d, DATA_TYPE& i) {
-		for (i = 1; i <= std::numeric_limits<DATA_TYPE>::max(); i++) {
-			a += d;
-			if (a == 0) { return true; }
-		}
-		return false;
-	}
-
 	void parse(const std::string& file) {
 		std::ifstream input(file);
+		if (!input.is_open()) {
+			failed = true;
+			return;
+		}
 		std::stack<int> stack;
 
 #ifdef LOG_INST
@@ -257,19 +255,38 @@ class Program {
 		for (const auto& i : program) { optimized << i << "\n"; }
 #endif
 	}
-	const auto& instructions() { return program; }
+	[[nodiscard]] auto isOK() const { return !failed; }
+	auto& instructions() { return program; }
 };
 
 int main(int argc, char* argv[]) {
 	Tape tape;
-	std::string file = "./input.txt";
-	if (argc > 1) { file = argv[1]; }
+	std::string file;
+	bool profile = false;
+	std::vector<std::string> args(argv + 1, argv + argc);
+	for (auto& arg : args) {
+		if (arg == "-p") {
+			profile = true;
+		} else if (file.empty()) {
+			file = arg;
+		}
+	}
+
+	if (file.empty()) {
+		std::cerr << "bf: fatal error: no input files\n";
+		return 1;
+	}
 
 	Program p(file);
 
+	if (!p.isOK()) {
+		std::cerr << "Cannot open file: " << file << "\n";
+		return 1;
+	}
+
 	const auto& code = p.instructions();
 
-	run<true>(tape, code.cbegin(), code.cend());
+	run(tape, code.cbegin(), code.cend());
 
 	return 0;
 }
