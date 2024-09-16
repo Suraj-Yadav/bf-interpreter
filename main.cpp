@@ -178,9 +178,6 @@ class Program {
 		}
 	}
 
-	void addInstruction(Instruction inst) {
-		program.push_back(inst);
-
 	void parse(const std::string& file) {
 		std::ifstream input(file);
 		std::stack<int> stack;
