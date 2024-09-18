@@ -1,7 +1,11 @@
+#include <algorithm>
 #include <array>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
+#include <span>
 #include <stack>
 #include <vector>
 
@@ -122,11 +126,11 @@ bool operator<(const Instruction& a, const Instruction& b) {
 	return a.lRef < b.lRef;
 }
 
-void run(
-	Tape& tape, std::vector<Instruction>::const_iterator begin,
-	std::vector<Instruction>::const_iterator end) {
-	for (auto itr = begin; itr != end; itr++) {
+auto run(Tape& tape, std::span<Instruction> code) {
+	std::vector<int> count(code.size(), 0);
+	for (auto itr = code.begin(); itr != code.end(); itr++) {
 		const auto& inst = *itr;
+		count[itr - code.begin()]++;
 		switch (inst.code) {
 			case TAPE_M: {
 				tape.move(inst.value);
@@ -141,7 +145,9 @@ void run(
 				break;
 			}
 			case READ: {
-				std::cin >> tape.get();
+				char ch = '\0';
+				std::cin.get(ch);
+				tape.get() = ch;
 				break;
 			}
 			case JUMP_C: {
@@ -168,9 +174,10 @@ void run(
 			case NO_OP:
 				break;
 			case HALT:
-				return;
+				return count;
 		}
 	}
+	return count;
 }
 
 // Determine loop count (i) by solving (a + d * i) mod 256 = 0 (mod 256)
@@ -182,9 +189,57 @@ bool solveForLoopCount(DATA_TYPE a, DATA_TYPE d, DATA_TYPE& i) {
 	return false;
 }
 
+bool isLoop(std::span<Instruction> code) {
+	if (code.empty()) { return false; }
+	if (code.front().code != JUMP_C) { return false; }
+	if (code.back().code != JUMP_O) { return false; }
+	code = code.subspan(1, code.size() - 2);
+	return !code.empty();
+}
+
+bool isInnerMostLoop(std::span<Instruction> code) {
+	if (!isLoop(code)) { return false; }
+	code = code.subspan(1, code.size() - 2);
+	for (auto& e : code) {
+		if (e.code == JUMP_C) { return false; }
+	}
+	return true;
+}
+
+bool isSimpleLoop(std::span<Instruction> code) {
+	if (!isLoop(code)) { return false; }
+	code = code.subspan(1, code.size() - 2);
+
+	Tape tape;
+	for (auto& e : code) {
+		switch (e.code) {
+			case INCR_R:
+			case WRITE:
+			case READ:
+			case DEBUG:
+			case HALT:
+				return false;
+			case JUMP_C:
+			case JUMP_O:
+			case NO_OP:
+				break;
+			case TAPE_M:
+				tape.move(e.value);
+				break;
+			case INCR_C:
+				tape.get(e.lRef) += e.value;
+				break;
+		}
+	}
+	return tape.get() == 1 ||
+		   tape.get() == std::numeric_limits<DATA_TYPE>::max();
+}
+
 class Program {
-	bool failed = false;
+	std::optional<std::string> err;
 	std::vector<Instruction> program;
+	std::string sourceCode;
+	std::vector<int> srcToProgram;
 
 	void aggregate() {
 		if (program.size() < 2) { return; }
@@ -203,10 +258,16 @@ class Program {
 		}
 	}
 
+	int getProgramToCode(int pos) {
+		return static_cast<int>(
+			std::lower_bound(srcToProgram.begin(), srcToProgram.end(), pos) -
+			srcToProgram.begin());
+	}
+
 	void parse(const std::string& file) {
 		std::ifstream input(file);
 		if (!input.is_open()) {
-			failed = true;
+			err = "Cannot read file: '" + file + "'";
 			return;
 		}
 		std::stack<int> stack;
@@ -219,7 +280,7 @@ class Program {
 			auto ch = '\0';
 			Instruction inst;
 
-			if (input >> ch) {
+			if (input.get(ch)) {
 				inst = getInstruction(ch);
 			} else {
 				inst = {Inst_Codes::HALT, 0, 0, 0};
@@ -231,19 +292,34 @@ class Program {
 				original << inst << "\n";
 #endif
 				aggregate();
+			} else {
+				ch = '\0';
 			}
+
+			sourceCode.push_back(ch);
+			srcToProgram.push_back(static_cast<int>(program.size() - 1));
+
 			if (inst.code == JUMP_C) {
 				int pos = static_cast<int>(program.size() - 1);
 				stack.push(pos);
 			} else if (inst.code == JUMP_O) {
 				int closing = static_cast<int>(program.size() - 1);
+				if (stack.empty()) {
+					err = "Mismatched loop end at char " +
+						  std::to_string(getProgramToCode(closing));
+					break;
+				}
 				int opening = stack.top();
 				program[opening].value = closing - opening;
 				program[closing].value = opening - closing;
 				stack.pop();
 			} else if (inst.code == HALT) {
-				return;
+				break;
 			}
+		}
+		if (!stack.empty()) {
+			err = "Mismatched loop start at char " +
+				  std::to_string(getProgramToCode(stack.top()));
 		}
 	}
 
@@ -255,12 +331,55 @@ class Program {
 		for (const auto& i : program) { optimized << i << "\n"; }
 #endif
 	}
-	[[nodiscard]] auto isOK() const { return !failed; }
+	[[nodiscard]] auto isOK() const { return !err.has_value(); }
+	auto error() { return err.value(); }
 	auto& instructions() { return program; }
+
+	void printProfileInfo(std::span<int> runCounts) {
+		constexpr auto WIDTH = 5;
+		if (runCounts.size() != program.size()) {
+			throw std::runtime_error(
+				"Mismatch in length of runCounts and program");
+		}
+		std::cout << "\n==============Profile Info==============\n";
+		for (auto i = 0u; i < sourceCode.size(); ++i) {
+			if (sourceCode[i] == '\0') { continue; }
+			std::cout << std::setw(WIDTH) << i << " : " << sourceCode[i]
+					  << " : " << runCounts[srcToProgram[i]] << "\n";
+		}
+		std::vector<std::pair<int, int>> simple, notSimple;
+		for (auto i = 0u; i < program.size(); ++i) {
+			const auto& instr = program[i];
+			if (instr.code != JUMP_C) { continue; }
+			std::span<Instruction> code(
+				program.begin() + i, program.begin() + i + instr.value + 1);
+			if (!isInnerMostLoop(code)) { continue; }
+			if (isSimpleLoop(code)) {
+				simple.emplace_back(runCounts[i], i);
+			} else {
+				notSimple.emplace_back(runCounts[i], i);
+			}
+		}
+		std::sort(simple.begin(), simple.end(), std::greater<>());
+		std::sort(notSimple.begin(), notSimple.end(), std::greater<>());
+		if (!simple.empty()) {
+			std::cout << "\n==============Simple Loops==============\n";
+		}
+		for (auto& e : simple) {
+			std::cout << std::setw(WIDTH) << getProgramToCode(e.second)
+					  << " : [ " << e.first << '\n';
+		}
+		if (!notSimple.empty()) {
+			std::cout << "\n============Not Simple Loops============\n";
+		}
+		for (auto& e : notSimple) {
+			std::cout << std::setw(WIDTH) << getProgramToCode(e.second)
+					  << " : [ " << e.first << '\n';
+		}
+	}
 };
 
 int main(int argc, char* argv[]) {
-	Tape tape;
 	std::string file;
 	bool profile = false;
 	std::vector<std::string> args(argv + 1, argv + argc);
@@ -280,13 +399,19 @@ int main(int argc, char* argv[]) {
 	Program p(file);
 
 	if (!p.isOK()) {
-		std::cerr << "Cannot open file: " << file << "\n";
+		std::cerr << p.error() << "\n";
 		return 1;
 	}
 
-	const auto& code = p.instructions();
+	auto& code = p.instructions();
 
-	run(tape, code.cbegin(), code.cend());
+	Tape tape;
+	if (profile) {
+		auto counts = run(tape, code);
+		p.printProfileInfo(counts);
+	} else {
+		run(tape, code);
+	}
 
 	return 0;
 }

@@ -9,7 +9,7 @@ bf_g: main.cpp
 	g++ -g -std=c++20 main.cpp -o ./bf_g
 
 clean:
-	rm bf
+	rm -f bf bf_g
 
 test: build
 	./run_test.sh
