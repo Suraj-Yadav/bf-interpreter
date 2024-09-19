@@ -106,7 +106,7 @@ Instruction getInstruction(char ch) {
 	return {Inst_Codes::NO_OP, 0, 0, 0};
 }
 
-#define LOG_INST 1
+// #define LOG_INST 1
 
 #ifdef LOG_INST
 std::ostream& operator<<(std::ostream& os, const Instruction& a) {
