@@ -9,13 +9,8 @@ bf_g: main.cpp
 	g++ -g -std=c++20 main.cpp -o ./bf_g
 
 clean:
-	rm bf
+	rm -f bf bf_g
 
 test: build
-	@for file in ./benches/*.b ; do \
-		printf "\nRunning $${file}"; \
-		time ./bf $${file} >./run.out || exit 1; \
-		diff --brief ./run.out $${file}.out.txt || exit 1; \
-	done
-	@rm ./run.out
+	./run_test.sh
 
