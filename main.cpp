@@ -366,15 +366,23 @@ class Program {
 			std::cout << "\n==============Simple Loops==============\n";
 		}
 		for (auto& e : simple) {
-			std::cout << std::setw(WIDTH) << getProgramToCode(e.second)
-					  << " : [ " << e.first << '\n';
+			auto begin = getProgramToCode(e.second);
+			std::cout << std::setw(WIDTH) << e.second << " : ";
+			for (auto i = begin; sourceCode[i] != ']'; ++i) {
+				std::cout << sourceCode[i];
+			}
+			std::cout << "] : " << e.first << '\n';
 		}
 		if (!notSimple.empty()) {
 			std::cout << "\n============Not Simple Loops============\n";
 		}
 		for (auto& e : notSimple) {
-			std::cout << std::setw(WIDTH) << getProgramToCode(e.second)
-					  << " : [ " << e.first << '\n';
+			auto begin = getProgramToCode(e.second);
+			std::cout << std::setw(WIDTH) << e.second << " : ";
+			for (auto i = begin; sourceCode[i] != ']'; ++i) {
+				std::cout << sourceCode[i];
+			}
+			std::cout << "] : " << e.first << '\n';
 		}
 	}
 };
