@@ -17,6 +17,6 @@ bfc: compiler.cpp
 clean:
 	rm -f bfi bfi_g bfc
 
-test: bfi
+test: bfi bfc
 	./run_test.sh
 

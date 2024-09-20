@@ -3,10 +3,11 @@
 ## build
 `make build`
 
-creates an executable `bf` in the current directory
+creates executable `bfi` (interpreter) and `bfc` (compiler) in the current directory
 
 ## run
-`bf <path-to-input-file>`
+`bfi [-p] <path-to-input-file>`
+`bfc <path-to-input-file>`
 
 ## test
 `make test`
