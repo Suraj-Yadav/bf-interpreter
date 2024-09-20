@@ -16,7 +16,7 @@ main:
 
 	constexpr auto TAPE_LENGTH = 88888;
 	// I store the current index of tape in register B
-	output << "	mov ebx, " << 0 << "\n";
+	output << "	mov ebx, " << TAPE_LENGTH / 2 << "\n";
 
 	auto loc = 0u;
 	for (auto& i : code) {
