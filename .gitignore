@@ -30,5 +30,6 @@
 *.exe
 *.out
 *.app
-bf
-bf_g
+bfi
+bfi_g
+bfc
