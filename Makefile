@@ -1,16 +1,22 @@
-build: bf
 
-bf: main.cpp 
-	g++ -Ofast -Wall -Wextra -Wpedantic -std=c++20 main.cpp -o ./bf
+CXXFLAGS := -Wall -Wextra -Wpedantic -std=c++20
 
-build_dbg: bf_g build
+build: bfi bfc
 
-bf_g: main.cpp
-	g++ -g -std=c++20 main.cpp -o ./bf_g
+build_dbg: bfi_g bfc_g build
+
+bfi: interpreter.cpp 
+	g++ -Ofast $(CXXFLAGS) interpreter.cpp -o ./bfi
+
+bfi_g: interpreter.cpp
+	g++ -g $(CXXFLAGS) interpreter.cpp -o ./bfi_g
+
+bfc: compiler.cpp
+	g++ -g $(CXXFLAGS) compiler.cpp -o ./bfc
 
 clean:
-	rm -f bf bf_g
+	rm -f bfi bfi_g bfc
 
-test: build
+test: bfi bfc
 	./run_test.sh
 

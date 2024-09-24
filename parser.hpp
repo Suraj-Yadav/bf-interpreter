@@ -1,67 +1,15 @@
 #include <algorithm>
-#include <array>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <span>
-#include <stack>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using DATA_TYPE = unsigned char;
-
-class Tape {
-	static_assert(sizeof(DATA_TYPE) == 1);
-	std::vector<DATA_TYPE> right, left;
-	int index = 0;
-
-   public:
-	Tape() { right.emplace_back(); }
-
-	void print() {
-		std::cout << "index = " << index << '\n';
-		while (!left.empty()) {
-			const auto& e = left.back();
-			std::cout << (int)e << "\t";
-			left.pop_back();
-		}
-		for (auto& e : right) { std::cout << (int)e << "\t"; }
-		std::cout << '\n';
-	}
-
-	DATA_TYPE& get(int delta = 0) { return operator[](index + delta); }
-
-	void expand(int ind) {
-		if (ind >= 0) {
-			while (ind >= static_cast<int>(right.size())) {
-				right.emplace_back();
-			}
-		} else {
-			auto i = -ind - 1;
-			while (i >= static_cast<int>(left.size())) { left.emplace_back(); }
-		}
-	}
-
-	void move(int delta) {
-		index += delta;
-		expand(index);
-	}
-
-	void moveRight() { move(1); }
-
-	void moveLeft() { move(-1); }
-
-	DATA_TYPE& operator[](int index) {
-		expand(index);
-		if (index >= 0) { return right[index]; }
-		index = -index - 1;
-		return left[index];
-	}
-
-	int begin() { return -static_cast<int>(left.size()); }
-	int end() { return static_cast<int>(right.size()); }
-};
 
 enum Inst_Codes {
 	NO_OP = 0,
@@ -121,74 +69,6 @@ std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 }
 #endif
 
-bool operator<(const Instruction& a, const Instruction& b) {
-	if (a.code != b.code) { return a.code < b.code; }
-	return a.lRef < b.lRef;
-}
-
-auto run(Tape& tape, std::span<Instruction> code) {
-	std::vector<int> count(code.size(), 0);
-	for (auto itr = code.begin(); itr != code.end(); itr++) {
-		const auto& inst = *itr;
-		count[itr - code.begin()]++;
-		switch (inst.code) {
-			case TAPE_M: {
-				tape.move(inst.value);
-				break;
-			}
-			case INCR_C: {
-				tape.get(inst.lRef) += inst.value;
-				break;
-			}
-			case WRITE: {
-				std::cout << tape.get();
-				break;
-			}
-			case READ: {
-				char ch = '\0';
-				std::cin.get(ch);
-				tape.get() = ch;
-				break;
-			}
-			case JUMP_C: {
-				if (tape.get() == 0) {
-					itr += inst.value;
-					itr--;
-				}
-				break;
-			}
-			case JUMP_O: {
-				if (tape.get() != 0) {
-					itr += inst.value;
-					itr--;
-				}
-				break;
-			}
-			case INCR_R: {
-				tape.get(inst.lRef) += inst.value * tape.get(inst.rRef);
-				break;
-			}
-			case DEBUG: {
-				tape.print();
-			}
-			case NO_OP:
-				break;
-			case HALT:
-				return count;
-		}
-	}
-	return count;
-}
-
-// Determine loop count (i) by solving (a + d * i) mod 256 = 0 (mod 256)
-bool solveForLoopCount(DATA_TYPE a, DATA_TYPE d, DATA_TYPE& i) {
-	for (i = 1; i <= std::numeric_limits<DATA_TYPE>::max(); i++) {
-		a += d;
-		if (a == 0) { return true; }
-	}
-	return false;
-}
-
 bool isLoop(std::span<Instruction> code) {
 	if (code.empty()) { return false; }
 	if (code.front().code != JUMP_C) { return false; }
@@ -210,7 +90,8 @@ bool isSimpleLoop(std::span<Instruction> code) {
 	if (!isLoop(code)) { return false; }
 	code = code.subspan(1, code.size() - 2);
 
-	Tape tape;
+	DATA_TYPE loopCounter = 0;
+	int tapePtr = 0;
 	for (auto& e : code) {
 		switch (e.code) {
 			case INCR_R:
@@ -224,15 +105,15 @@ bool isSimpleLoop(std::span<Instruction> code) {
 			case NO_OP:
 				break;
 			case TAPE_M:
-				tape.move(e.value);
+				tapePtr += e.value;
 				break;
 			case INCR_C:
-				tape.get(e.lRef) += e.value;
+				if (tapePtr == 0) { loopCounter += e.value; }
 				break;
 		}
 	}
-	return tape.get() == 1 ||
-		   tape.get() == std::numeric_limits<DATA_TYPE>::max();
+	return loopCounter == 1 ||
+		   loopCounter == std::numeric_limits<DATA_TYPE>::max();
 }
 
 class Program {
@@ -270,7 +151,7 @@ class Program {
 			err = "Cannot read file: '" + file + "'";
 			return;
 		}
-		std::stack<int> stack;
+		std::vector<int> stack;
 
 #ifdef LOG_INST
 		std::ofstream original("/tmp/orig.bfas");
@@ -301,7 +182,7 @@ class Program {
 
 			if (inst.code == JUMP_C) {
 				int pos = static_cast<int>(program.size() - 1);
-				stack.push(pos);
+				stack.push_back(pos);
 			} else if (inst.code == JUMP_O) {
 				int closing = static_cast<int>(program.size() - 1);
 				if (stack.empty()) {
@@ -309,17 +190,17 @@ class Program {
 						  std::to_string(getProgramToCode(closing));
 					break;
 				}
-				int opening = stack.top();
+				int opening = stack.back();
 				program[opening].value = closing - opening;
 				program[closing].value = opening - closing;
-				stack.pop();
+				stack.pop_back();
 			} else if (inst.code == HALT) {
 				break;
 			}
 		}
 		if (!stack.empty()) {
 			err = "Mismatched loop start at char " +
-				  std::to_string(getProgramToCode(stack.top()));
+				  std::to_string(getProgramToCode(stack.back()));
 		}
 	}
 
@@ -386,40 +267,3 @@ class Program {
 		}
 	}
 };
-
-int main(int argc, char* argv[]) {
-	std::string file;
-	bool profile = false;
-	std::vector<std::string> args(argv + 1, argv + argc);
-	for (auto& arg : args) {
-		if (arg == "-p") {
-			profile = true;
-		} else if (file.empty()) {
-			file = arg;
-		}
-	}
-
-	if (file.empty()) {
-		std::cerr << "bf: fatal error: no input files\n";
-		return 1;
-	}
-
-	Program p(file);
-
-	if (!p.isOK()) {
-		std::cerr << p.error() << "\n";
-		return 1;
-	}
-
-	auto& code = p.instructions();
-
-	Tape tape;
-	if (profile) {
-		auto counts = run(tape, code);
-		p.printProfileInfo(counts);
-	} else {
-		run(tape, code);
-	}
-
-	return 0;
-}
