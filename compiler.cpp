@@ -2,6 +2,11 @@
 
 #include "parser.hpp"
 
+int mod(int v) {
+	while (v < 256) { v += 256; }
+	return v & 255;
+}
+
 bool compile(std::span<Instruction> code, const std::filesystem::path& path) {
 	std::ofstream output(path);
 
@@ -28,7 +33,7 @@ main:
 				break;
 			case INCR_C:
 				output << "	movzx ecx, BYTE PTR tape[rbx]\n";
-				output << "	add ecx, " << i.value << "\n";
+				output << "	add ecx, " << mod(i.value) << "\n";
 				output << "	mov BYTE PTR tape[rbx], cl\n";
 				break;
 			case INCR_R:
@@ -44,9 +49,9 @@ main:
 				output << "	mov BYTE PTR tape[rbx], al\n";
 				break;
 			case JUMP_C:
-				output << ".LOC" << loc << ":\n";
 				output << "	cmp BYTE PTR tape[rbx], 0\n";
 				output << "	je .LOC" << loc + i.value << "\n";
+				output << ".LOC" << loc << ":\n";
 				break;
 			case JUMP_O:
 				output << "	cmp BYTE PTR tape[rbx], 0\n";
