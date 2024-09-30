@@ -1,11 +1,14 @@
 #include <immintrin.h>
 
+#include <bitset>
+#include <chrono>
+#include <cstring>
 #include <iostream>
-#include <span>
-#include <vector>
+#include <random>
 
-#include "parser.hpp"
 #include "util.hpp"
+
+using DATA_TYPE = unsigned char;
 
 int slowScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 	for (auto i = 0;; i += jump) {
@@ -32,6 +35,20 @@ auto rev(auto a) {
 	);
 	const auto f2 = _mm512_set_epi64(1, 0, 3, 2, 5, 4, 7, 6);
 	return _mm512_permutexvar_epi64(f2, _mm512_shuffle_epi8(a, f1));
+}
+
+int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
+	auto i = 0;
+	const auto* ptr = (const VEC*)(&tape[BASE]);
+	auto mask = maskFromJump(jump);
+	const VEC v_rhs = _mm512_setzero_si512();
+	for (; i + VEC_SZ <= tape.size(); i += VEC_SZ) {
+		auto v_lhs = _mm512_loadu_si512(ptr);
+		auto v_eq = _mm512_mask_cmpeq_epi8_mask(mask, v_lhs, v_rhs);
+		if (v_eq != 0) { return std::countr_zero(v_eq) + i; }
+		ptr++;
+	}
+	return -1;
 }
 
 template <bool isPowerOf2, bool isJumpNegative>
@@ -89,10 +106,6 @@ int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 }
 
 int scan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
-	if (jump == 0) {
-		if (tape[BASE] == 0) { return 0; }
-	}
-	if (jump > 16 || jump < -16) { return slowScan(tape, BASE, jump); }
 	auto isNeg = jump < 0;
 	if (isNeg) { jump = -jump; }
 	auto isPowerOf2 = (jump & (jump - 1)) == 0;
@@ -105,101 +118,87 @@ int scan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 	return fastScan<false, false>(tape, BASE, jump);
 }
 
-auto run(std::span<Instruction> code) {
-	const auto TAPE_LENGTH = 1000000u;
+int main() {
+	std::random_device rd;
+	std::mt19937 g(rd());
+	std::uniform_int_distribution<> d(100, 600);
 
-	std::vector<DATA_TYPE> tape(TAPE_LENGTH, 0);
-	int ptr = TAPE_LENGTH / 2;
+	auto start = std::chrono::high_resolution_clock::now();
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> diff = end - start;
 
-	std::vector<int> count(code.size(), 0);
-	for (auto itr = code.begin(); itr != code.end(); itr++) {
-		const auto& inst = *itr;
-		count[itr - code.begin()]++;
-		switch (inst.code) {
-			case TAPE_M:
-				ptr += inst.value;
-				break;
+	double stime = 0, ftime = 0;
 
-			case INCR_C:
-				tape[ptr + inst.lRef] += inst.value;
-				break;
+	int a = 0, b = 0;
 
-			case SCAN: {
-				ptr += scan(tape, ptr, inst.value);
-				break;
+	const auto REPEAT = 1000000;
+	const auto SIZE = 700;
+	const auto LOOP = 7;
+
+	auto n = d(g);
+	auto j = d(g) / 100;
+	j = 1;
+	n -= n % j;
+	// n = 261;
+	// j = 3;
+	for (auto i = 0; i < REPEAT; ++i) {
+		const auto BASE = SIZE - 1;
+		std::vector<DATA_TYPE> h(2 * SIZE - 1, 0);
+
+		for (auto i = 0; i < SIZE; ++i) {
+			if (i % j == 0) {
+				h[BASE + i] = i % LOOP + 1;
+			} else {
+				h[BASE + i] = 0;
 			}
-
-			case SET_C:
-				tape[ptr] = inst.value;
-				break;
-
-			case WRITE:
-				std::putchar(tape[ptr]);
-				break;
-
-			case READ:
-				tape[ptr] = std::getchar();
-				break;
-
-			case JUMP_C:
-				if (tape[ptr] == 0) { itr += inst.value; }
-				break;
-
-			case JUMP_O:
-				if (tape[ptr] != 0) { itr += inst.value; }
-				break;
-
-			case INCR_R:
-				tape[ptr + inst.lRef] += inst.value * tape[ptr + inst.rRef];
-				break;
-
-			case DEBUG: {
-				std::cout << "tape[" << ptr << "] = " << (int)tape[ptr]
-						  << std::endl;
-				// 		std::cout << "index = " << index << '\n';
-				// 		while (!left.empty()) {
-				// 			const auto& e = left.back();
-				// 			std::cout << (int)e << "\t";
-				// 			left.pop_back();
-				// 		}
-				// 		for (auto& e : right) { std::cout << (int)e << "\t"; }
-				// 		std::cout << '\n';
-			}
-			case NO_OP:
-				break;
-			case HALT:
-				return count;
 		}
+		for (auto i = 0; i < SIZE; ++i) {
+			if (i % j == 0) {
+				h[BASE - i] = i % LOOP + 1;
+			} else {
+				h[BASE - i] = 0;
+			}
+		}
+		h[BASE - n] = 0;
+
+		start = std::chrono::high_resolution_clock::now();
+		a = slowScan(h, BASE, -j);
+		end = std::chrono::high_resolution_clock::now();
+		diff = end - start;
+		stime += diff.count();
+
+		start = std::chrono::high_resolution_clock::now();
+		b = scan(h, BASE, -j);
+		end = std::chrono::high_resolution_clock::now();
+		diff = end - start;
+		ftime += diff.count();
+
+		if (a == b) { continue; }
+
+		print(std::cout, "n: %, j: %", n, j);
+		print(std::cout, "FAST FAIL: EXPECTED: % GOT: %", a, b);
+		for (auto i = 0; i < 2 * SIZE - 1;) {
+			if (i == (BASE + a)) { std::cout << "\x1B[32m"; }
+			if (i == (BASE + b)) { std::cout << "\x1B[31m"; }
+			if (i % j == 0) {
+				std::cout << "*";
+			} else {
+				std::cout << " ";
+			}
+			std::cout << std::setw(4) << i - BASE << "=" << (int)h[i] << ",";
+			if (i == (BASE + a)) { std::cout << "\033[0m"; }
+			if (i == (BASE + b)) { std::cout << "\033[0m"; }
+			i++;
+			if (i % 16 == 0) { std::cout << '\n'; }
+		}
+		std::cout << "\n";
+		break;
 	}
-	return count;
-}
 
-int main(int argc, char* argv[]) {
-	auto args = argparse(argc, argv);
-
-	if (args.input.empty()) {
-		std::cerr << "bf: fatal error: no input files\n";
-		return 1;
-	}
-
-	Program p(args.input);
-
-	if (!p.isOK()) {
-		std::cerr << p.error() << "\n";
-		return 1;
-	}
-
-	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
-	if (args.optimizeScans) { p.optimizeScans(); }
-
-	auto& code = p.instructions();
-
-	if (args.profile) {
-		auto counts = run(code);
-		p.printProfileInfo(counts);
-	} else {
-		run(code);
-	}
+	print(
+		std::cout,
+		"Time a = %, j = %, n = %, slow: %s\tfast: %s\nSLOW/FAST = %", a, j, n,
+		stime, ftime, stime / ftime);
 
 	return 0;
 }
