@@ -36,7 +36,12 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 	for (auto i = 0u; i < VEC_SZ; i += jump) { mask = mask | 1ULL << i; }
 
 	const auto shift = jump - static_cast<int>(VEC_SZ) % jump;
-	const auto mask_mask = (1 << (shift + 1)) - 1;
+	__mmask64 mask_mask = (1 << (shift + 1)) - 1;
+
+	if (isNeg) {
+		mask = revBits(mask);
+		mask_mask = revBits(mask_mask);
+	}
 
 	print(output, "#Scan of %", sign * jump);
 	// Generate instructions
@@ -51,29 +56,37 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 	print(output, "	add rbx, %", sign * VEC_SZ);
 	print(output, "	vmovdqu64 zmm1, ZMMWORD PTR tape[rbx]");
 
-	if (isNeg) {
-		// reverse zmm1
-		print(output, "	vpshufb zmm1, zmm1, ZMMWORD PTR SHUFFLE");
-		print(output, "	vmovdqu64 zmm2, ZMMWORD PTR PERMUTE");
-		print(output, "	vpermq zmm1, zmm2, zmm1");
-	}
-	_mm512_set_epi64(0, 0, 0, 0, 0, 0, 0, 0);
 	print(output, "	vpcmpb k0 {k1}, zmm0, zmm1, 0");
 
 	if (!isPowerOf2) {
-		print(output, "	mov rdx, rax");
-		print(output, "	shl rdx, %", shift);
-		print(output, "	shr rax, %", jump - shift);
-		print(output, "	and rax, %", mask_mask);
-		print(output, "	or rax, rdx");
-		print(output, "	kmovq k1, rax");
+		if (isNeg) {
+			print(output, "	mov rdx, rax");
+			print(output, "	shr rdx, %", shift);
+			print(output, "	shl rax, %", jump - shift);
+			print(output, "	mov rcx, %", mask_mask);
+			print(output, "	and rax, rcx");
+			print(output, "	or rax, rdx");
+			print(output, "	kmovq k1, rax");
+
+		} else {
+			print(output, "	mov rdx, rax");
+			print(output, "	shl rdx, %", shift);
+			print(output, "	shr rax, %", jump - shift);
+			print(output, "	and rax, %", mask_mask);
+			print(output, "	or rax, rdx");
+			print(output, "	kmovq k1, rax");
+		}
 	}
 
 	print(output, "	kortestq k0, k0");
 	print(output, "	je .SCAN_START%", loc);
 
 	print(output, "	kmovq   rax, k0");
-	print(output, "	rep bsf rdx, rax");
+	if (isNeg) {
+		print(output, "	rep bsr rdx, rax");
+	} else {
+		print(output, "	rep bsf rdx, rax");
+	}
 	if (isNeg) {
 		print(output, "	add rbx, %", VEC_SZ - 1);
 		print(output, "	sub rbx, rdx");

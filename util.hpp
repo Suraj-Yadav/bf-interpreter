@@ -50,3 +50,17 @@ Args argparse(int argc, char* argv[]) {
 	}
 	return a;
 }
+
+
+template <typename T> T revBits(T v) {
+	auto r = v;
+	auto s = std::numeric_limits<T>::digits - 1;
+	for (v >>= 1; v; v >>= 1) {
+		r <<= 1;
+		r |= v & 1;
+		s--;
+	}
+	r <<= s;
+	return r;
+}
+

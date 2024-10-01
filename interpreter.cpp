@@ -23,17 +23,6 @@ auto maskFromJump(int jump) {
 	return m;
 }
 
-auto rev(auto a) {
-	const auto f1 = _mm512_set_epi8(
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,  //
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,  //
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,  //
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15   //
-	);
-	const auto f2 = _mm512_set_epi64(1, 0, 3, 2, 5, 4, 7, 6);
-	return _mm512_permutexvar_epi64(f2, _mm512_shuffle_epi8(a, f1));
-}
-
 template <bool isPowerOf2, bool isJumpNegative>
 int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 	auto i = 0;
@@ -45,7 +34,8 @@ int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 
 	// generate a mask marking elements visited by jump
 	auto mask = maskFromJump(jump);
-	int shift = 0, mask_mask = 0;
+	auto mask_mask = 0 * mask;
+	int shift = 0;
 
 	if constexpr (!isPowerOf2) {
 		// Below 2 are only used when powerOf2 is false;
@@ -56,6 +46,10 @@ int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 
 		// std::cout << "shift = " << shift << "\n";
 	}
+	if (isJumpNegative) {
+		mask = revBits(mask);
+		mask_mask = revBits(mask_mask);
+	}
 
 	// value to test for
 	const VEC v_rhs = _mm512_setzero_si512();
@@ -63,21 +57,21 @@ int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 	for (;; i += VEC_SZ) {
 		// load VEC_SZ elements into a variable
 		auto v_lhs = _mm512_loadu_si512(ptr);
-		if constexpr (isJumpNegative) { v_lhs = rev(v_lhs); }
 		// result has its ith bit set if ith element == 0
 		auto v_eq = _mm512_mask_cmpeq_epi8_mask(mask, v_lhs, v_rhs);
 
-		// std::cout << std::setw(3) << i << " = " <<
-		// std::bitset<BATCH_SZ>(mask)
-		// 		  << "\n";
-		// std::cout << "      " << std::bitset<BATCH_SZ>(v_eq) << "\n";
-
-		if (v_eq != 0) {						// found something somewhere
-			return std::countr_zero(v_eq) + i;	// find the first set bit
+		if (v_eq != 0) {  // found something somewhere
+			// find the first/last set bit
+			if constexpr (isJumpNegative) { return std::countl_zero(v_eq) + i; }
+			return std::countr_zero(v_eq) + i;
 		}
 
 		if constexpr (!isPowerOf2) {
-			mask = (mask << shift) | (mask_mask & (mask >> (jump - shift)));
+			if constexpr (isJumpNegative) {
+				mask = (mask >> shift) | (mask_mask & (mask << (jump - shift)));
+			} else {
+				mask = (mask << shift) | (mask_mask & (mask >> (jump - shift)));
+			}
 		}
 		if constexpr (isJumpNegative) {
 			ptr--;
