@@ -1,105 +1,156 @@
+#include <immintrin.h>
+
 #include <iostream>
 #include <span>
 #include <vector>
 
 #include "parser.hpp"
+#include "util.hpp"
 
-class Tape {
-	static_assert(sizeof(DATA_TYPE) == 1);
-	std::vector<DATA_TYPE> right, left;
-	int index = 0;
+int slowScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
+	for (auto i = 0;; i += jump) {
+		if (tape[i + BASE] == 0) { return i; }
+	}
+	return -1;
+}
 
-   public:
-	Tape() { right.emplace_back(); }
+using VEC = __m512i;
+constexpr auto VEC_SZ = sizeof(VEC) / sizeof(DATA_TYPE);
 
-	void print() {
-		std::cout << "index = " << index << '\n';
-		while (!left.empty()) {
-			const auto& e = left.back();
-			std::cout << (int)e << "\t";
-			left.pop_back();
-		}
-		for (auto& e : right) { std::cout << (int)e << "\t"; }
-		std::cout << '\n';
+auto maskFromJump(int jump) {
+	__mmask64 m = 0;
+	for (auto i = 0u; i < VEC_SZ; i += jump) { m = m | 1ULL << i; }
+	return m;
+}
+
+template <bool isPowerOf2, bool isJumpNegative>
+int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
+	auto i = 0;
+	const auto* ptr = (const VEC*)(&tape[BASE]);
+
+	if constexpr (isJumpNegative) {
+		ptr = (const VEC*)(&tape[BASE - VEC_SZ + 1]);
 	}
 
-	DATA_TYPE& get(int delta = 0) { return operator[](index + delta); }
+	// generate a mask marking elements visited by jump
+	auto mask = maskFromJump(jump);
+	int shift = 0;
 
-	void expand(int ind) {
-		if (ind >= 0) {
-			while (ind >= static_cast<int>(right.size())) {
-				right.emplace_back();
+	if constexpr (!isPowerOf2) {
+		// only used when powerOf2 is false;
+		// how much the mask shifts
+		shift = jump - static_cast<int>(VEC_SZ) % jump;
+		// std::cout << "shift = " << shift << "\n";
+	}
+	if (isJumpNegative) { mask = revBits(mask); }
+
+	// value to test for
+	const VEC v_rhs = _mm512_setzero_si512();
+
+	for (;; i += VEC_SZ) {
+		// load VEC_SZ elements into a variable
+		auto v_lhs = _mm512_loadu_si512(ptr);
+		// result has its ith bit set if ith element == 0
+		auto v_eq = _mm512_mask_cmpeq_epi8_mask(mask, v_lhs, v_rhs);
+
+		if (v_eq != 0) {  // found something somewhere
+			// find the first/last set bit
+			if constexpr (isJumpNegative) { return std::countl_zero(v_eq) + i; }
+			return std::countr_zero(v_eq) + i;
+		}
+
+		if constexpr (!isPowerOf2) {
+			if constexpr (isJumpNegative) {
+				mask = (mask >> shift) | (mask << (jump - shift));
+			} else {
+				mask = (mask << shift) | (mask >> (jump - shift));
 			}
+		}
+		if constexpr (isJumpNegative) {
+			ptr--;
 		} else {
-			auto i = -ind - 1;
-			while (i >= static_cast<int>(left.size())) { left.emplace_back(); }
+			ptr++;
 		}
 	}
+	return -1;
+}
 
-	void move(int delta) {
-		index += delta;
-		expand(index);
+int scan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
+	if (jump == 0) {
+		if (tape[BASE] == 0) { return 0; }
 	}
+	if (jump <= -16 || jump >= 16) { return slowScan(tape, BASE, jump); }
+	auto isNeg = jump < 0;
+	if (isNeg) { jump = -jump; }
+	auto isPowerOf2 = (jump & (jump - 1)) == 0;
 
-	void moveRight() { move(1); }
-
-	void moveLeft() { move(-1); }
-
-	DATA_TYPE& operator[](int index) {
-		expand(index);
-		if (index >= 0) { return right[index]; }
-		index = -index - 1;
-		return left[index];
+	if (isPowerOf2) {
+		if (isNeg) { return -fastScan<true, true>(tape, BASE, jump); }
+		return fastScan<true, false>(tape, BASE, jump);
 	}
+	if (isNeg) { return -fastScan<false, true>(tape, BASE, jump); }
+	return fastScan<false, false>(tape, BASE, jump);
+}
 
-	int begin() { return -static_cast<int>(left.size()); }
-	int end() { return static_cast<int>(right.size()); }
-};
+auto run(std::span<Instruction> code) {
+	const auto TAPE_LENGTH = 1000000u;
 
-auto run(Tape& tape, std::span<Instruction> code) {
+	std::vector<DATA_TYPE> tape(TAPE_LENGTH, 0);
+	int ptr = TAPE_LENGTH / 2;
+
 	std::vector<int> count(code.size(), 0);
 	for (auto itr = code.begin(); itr != code.end(); itr++) {
 		const auto& inst = *itr;
 		count[itr - code.begin()]++;
 		switch (inst.code) {
-			case TAPE_M: {
-				tape.move(inst.value);
+			case TAPE_M:
+				ptr += inst.value;
+				break;
+
+			case INCR_C:
+				tape[ptr + inst.lRef] += inst.value;
+				break;
+
+			case SCAN: {
+				ptr += scan(tape, ptr, inst.value);
 				break;
 			}
-			case INCR_C: {
-				tape.get(inst.lRef) += inst.value;
+
+			case SET_C:
+				tape[ptr] = inst.value;
 				break;
-			}
-			case WRITE: {
-				std::cout << tape.get();
+
+			case WRITE:
+				std::putchar(tape[ptr]);
 				break;
-			}
-			case READ: {
-				char ch = '\0';
-				std::cin.get(ch);
-				tape.get() = ch;
+
+			case READ:
+				tape[ptr] = std::getchar();
 				break;
-			}
-			case JUMP_C: {
-				if (tape.get() == 0) {
-					itr += inst.value;
-					itr--;
-				}
+
+			case JUMP_C:
+				if (tape[ptr] == 0) { itr += inst.value; }
 				break;
-			}
-			case JUMP_O: {
-				if (tape.get() != 0) {
-					itr += inst.value;
-					itr--;
-				}
+
+			case JUMP_O:
+				if (tape[ptr] != 0) { itr += inst.value; }
 				break;
-			}
-			case INCR_R: {
-				tape.get(inst.lRef) += inst.value * tape.get(inst.rRef);
+
+			case INCR_R:
+				tape[ptr + inst.lRef] += inst.value * tape[ptr + inst.rRef];
 				break;
-			}
+
 			case DEBUG: {
-				tape.print();
+				std::cout << "tape[" << ptr << "] = " << (int)tape[ptr]
+						  << std::endl;
+				// 		std::cout << "index = " << index << '\n';
+				// 		while (!left.empty()) {
+				// 			const auto& e = left.back();
+				// 			std::cout << (int)e << "\t";
+				// 			left.pop_back();
+				// 		}
+				// 		for (auto& e : right) { std::cout << (int)e << "\t"; }
+				// 		std::cout << '\n';
 			}
 			case NO_OP:
 				break;
@@ -111,37 +162,30 @@ auto run(Tape& tape, std::span<Instruction> code) {
 }
 
 int main(int argc, char* argv[]) {
-	std::string file;
-	bool profile = false;
-	std::vector<std::string> args(argv + 1, argv + argc);
-	for (auto& arg : args) {
-		if (arg == "-p") {
-			profile = true;
-		} else if (file.empty()) {
-			file = arg;
-		}
-	}
+	auto args = argparse(argc, argv);
 
-	if (file.empty()) {
+	if (args.input.empty()) {
 		std::cerr << "bf: fatal error: no input files\n";
 		return 1;
 	}
 
-	Program p(file);
+	Program p(args.input);
 
 	if (!p.isOK()) {
 		std::cerr << p.error() << "\n";
 		return 1;
 	}
 
+	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
+	if (args.optimizeScans) { p.optimizeScans(); }
+
 	auto& code = p.instructions();
 
-	Tape tape;
-	if (profile) {
-		auto counts = run(tape, code);
+	if (args.profile) {
+		auto counts = run(code);
 		p.printProfileInfo(counts);
 	} else {
-		run(tape, code);
+		run(code);
 	}
 
 	return 0;

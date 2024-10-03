@@ -18,29 +18,27 @@ UNDERLINE=$(tput smul)
 
 verify() {
 	file=$1
-	seconds=$2
 	if ! diff --brief ./run.out ${file}.out.txt; then
 		echo "${RED}FAILED: ${file}${NORMAL}"
 		echo "Compare ./run.out ${file}.out.txt"
 		exit 1
 	else
-		echo "${GREEN}PASSED: ${file} ${seconds} secs ${NORMAL}"
+		echo "${GREEN}PASSED: ${file}${NORMAL}"
 	fi
 }
 
 echo "Running Test for compiler"
 for file in ./benches/*.b; do
 	./bfc ${file}
-	SECONDS=0
 	timeout 20 ./a.out >./run.out
-	verify "${file}" $SECONDS
+	verify "${file}"
 	rm ./a.out ./run.out
 done
 
+echo
 echo "Running Test for Interpreter"
 for file in ./benches/*.b; do
-	SECONDS=0
 	timeout 20 ./bfi ${file} >./run.out
-	verify "${file}" $SECONDS
+	verify "${file}"
 	rm ./run.out
 done
