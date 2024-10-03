@@ -17,7 +17,7 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 	if (jump == 0) { return; }
 
 	// For large jump, normal scan works fine
-	if (false) {
+	if (jump <= -16 || jump >= 16) {
 		print(output, "	add rbx, %", -jump);
 		print(output, ".SCAN_START%:", loc);
 		print(output, "	add rbx, %", jump);
@@ -36,12 +36,8 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 	for (auto i = 0u; i < VEC_SZ; i += jump) { mask = mask | 1ULL << i; }
 
 	const auto shift = jump - static_cast<int>(VEC_SZ) % jump;
-	__mmask64 mask_mask = (1 << (shift + 1)) - 1;
 
-	if (isNeg) {
-		mask = revBits(mask);
-		mask_mask = revBits(mask_mask);
-	}
+	if (isNeg) { mask = revBits(mask); }
 
 	print(output, "#Scan of %", sign * jump);
 	// Generate instructions
@@ -63,8 +59,6 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 			print(output, "	mov rdx, rax");
 			print(output, "	shr rdx, %", shift);
 			print(output, "	shl rax, %", jump - shift);
-			print(output, "	mov rcx, %", mask_mask);
-			print(output, "	and rax, rcx");
 			print(output, "	or rax, rdx");
 			print(output, "	kmovq k1, rax");
 
@@ -72,7 +66,6 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 			print(output, "	mov rdx, rax");
 			print(output, "	shl rdx, %", shift);
 			print(output, "	shr rax, %", jump - shift);
-			print(output, "	and rax, %", mask_mask);
 			print(output, "	or rax, rdx");
 			print(output, "	kmovq k1, rax");
 		}
@@ -100,80 +93,6 @@ bool compile(std::span<Instruction> code, const std::filesystem::path& path) {
 	output << R"(
 .intel_syntax noprefix
 .section .rodata
-SHUFFLE:
-        .byte   15
-        .byte   14
-        .byte   13
-        .byte   12
-        .byte   11
-        .byte   10
-        .byte   9
-        .byte   8
-        .byte   7
-        .byte   6
-        .byte   5
-        .byte   4
-        .byte   3
-        .byte   2
-        .byte   1
-        .byte   0
-        .byte   15
-        .byte   14
-        .byte   13
-        .byte   12
-        .byte   11
-        .byte   10
-        .byte   9
-        .byte   8
-        .byte   7
-        .byte   6
-        .byte   5
-        .byte   4
-        .byte   3
-        .byte   2
-        .byte   1
-        .byte   0
-        .byte   15
-        .byte   14
-        .byte   13
-        .byte   12
-        .byte   11
-        .byte   10
-        .byte   9
-        .byte   8
-        .byte   7
-        .byte   6
-        .byte   5
-        .byte   4
-        .byte   3
-        .byte   2
-        .byte   1
-        .byte   0
-        .byte   15
-        .byte   14
-        .byte   13
-        .byte   12
-        .byte   11
-        .byte   10
-        .byte   9
-        .byte   8
-        .byte   7
-        .byte   6
-        .byte   5
-        .byte   4
-        .byte   3
-        .byte   2
-        .byte   1
-        .byte   0
-PERMUTE:
-        .quad   6
-        .quad   7
-        .quad   4
-        .quad   5
-        .quad   2
-        .quad   3
-        .quad   0
-        .quad   1
 .text
 	.globl main
 	.type main, @function
@@ -202,11 +121,19 @@ main:
 				print(output, "	mov BYTE PTR tape[rbx], cl");
 				break;
 			case INCR_R:
+				if (i.value == 1) {
+					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
+					print(output, "	add BYTE PTR tape[rbx+%], cl", i.lRef);
+				} else if (i.value == -1) {
+					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
+					print(output, "	sub BYTE PTR tape[rbx+%], cl", i.lRef);
 
-				print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-				print(output, "	mov eax, %", i.value);
-				print(output, "	imul eax, ecx");
-				print(output, "	add BYTE PTR tape[rbx+%], al", i.lRef);
+				} else {
+					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
+					print(output, "	mov eax, %", i.value);
+					print(output, "	imul eax, ecx");
+					print(output, "	add BYTE PTR tape[rbx+%], al", i.lRef);
+				}
 				break;
 			case WRITE:
 				print(output, "	mov rsi, QWORD PTR stdout");
@@ -276,7 +203,6 @@ int main(int argc, char* argv[]) {
 
 	auto outputPath =
 		std::filesystem::temp_directory_path() / "tmp-bf-assembly.s";
-	// outputPath.replace_extension("s");
 
 	compile(p.instructions(), outputPath);
 	auto command = "g++ -g " + outputPath.string();
@@ -285,7 +211,7 @@ int main(int argc, char* argv[]) {
 	auto retCode = std::system(command.c_str());
 
 	if (retCode == 0) {
-		// std::filesystem::remove(outputPath);
+		std::filesystem::remove(outputPath);
 		return 0;
 	}
 	std::cerr << "Bug in compiler\n";

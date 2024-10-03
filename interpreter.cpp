@@ -34,22 +34,15 @@ int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 
 	// generate a mask marking elements visited by jump
 	auto mask = maskFromJump(jump);
-	auto mask_mask = 0 * mask;
 	int shift = 0;
 
 	if constexpr (!isPowerOf2) {
-		// Below 2 are only used when powerOf2 is false;
+		// only used when powerOf2 is false;
 		// how much the mask shifts
 		shift = jump - static_cast<int>(VEC_SZ) % jump;
-		// used to update mask
-		mask_mask = (1 << (shift + 1)) - 1;
-
 		// std::cout << "shift = " << shift << "\n";
 	}
-	if (isJumpNegative) {
-		mask = revBits(mask);
-		mask_mask = revBits(mask_mask);
-	}
+	if (isJumpNegative) { mask = revBits(mask); }
 
 	// value to test for
 	const VEC v_rhs = _mm512_setzero_si512();
@@ -68,9 +61,9 @@ int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 
 		if constexpr (!isPowerOf2) {
 			if constexpr (isJumpNegative) {
-				mask = (mask >> shift) | (mask_mask & (mask << (jump - shift)));
+				mask = (mask >> shift) | (mask << (jump - shift));
 			} else {
-				mask = (mask << shift) | (mask_mask & (mask >> (jump - shift)));
+				mask = (mask << shift) | (mask >> (jump - shift));
 			}
 		}
 		if constexpr (isJumpNegative) {
@@ -86,7 +79,7 @@ int scan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 	if (jump == 0) {
 		if (tape[BASE] == 0) { return 0; }
 	}
-	if (jump > 16 || jump < -16) { return slowScan(tape, BASE, jump); }
+	if (jump <= -16 || jump >= 16) { return slowScan(tape, BASE, jump); }
 	auto isNeg = jump < 0;
 	if (isNeg) { jump = -jump; }
 	auto isPowerOf2 = (jump & (jump - 1)) == 0;

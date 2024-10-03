@@ -28,7 +28,7 @@ verify() {
 }
 
 echo "Running Test for compiler"
-for file in ./testing/benches/*.b; do
+for file in ./benches/*.b; do
 	./bfc ${file}
 	timeout 20 ./a.out >./run.out
 	verify "${file}"
@@ -37,7 +37,7 @@ done
 
 echo
 echo "Running Test for Interpreter"
-for file in ./testing/benches/*.b; do
+for file in ./benches/*.b; do
 	timeout 20 ./bfi ${file} >./run.out
 	verify "${file}"
 	rm ./run.out
