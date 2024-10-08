@@ -5,6 +5,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -59,99 +60,113 @@ Instruction getInstruction(char ch) {
 
 // #define LOG_INST 1
 
-#ifdef LOG_INST
 std::ostream& operator<<(std::ostream& os, const Instruction& a) {
-	constexpr auto InstNames = std::to_array(
-		{"NO_OP", "TAPE_M", "INCR_C", "INCR_R", "WRITE", "READ", "JUMP_C",
-		 "JUMP_O", "SET_C", "DEBUG", "HALT"});
-
-	static_assert((Inst_Codes::HALT + 1) == InstNames.size());
-
-	return os << InstNames[a.code] << "\t" << a.lRef << " = " << a.rRef << ", "
-			  << a.value;
-}
-#endif
-
-bool isLoop(std::span<Instruction> code) {
-	if (code.empty()) { return false; }
-	if (code.front().code != JUMP_C) { return false; }
-	if (code.back().code != JUMP_O) { return false; }
-	code = code.subspan(1, code.size() - 2);
-	return !code.empty();
-}
-
-bool isInnerMostLoop(std::span<Instruction> code) {
-	if (!isLoop(code)) { return false; }
-	code = code.subspan(1, code.size() - 2);
-	for (auto& e : code) {
-		if (e.code == JUMP_C) { return false; }
+	switch (a.code) {
+		case INCR_R:
+			return os << "INCR(p[" << a.lRef << "]+=" << a.value << "*p["
+					  << a.rRef << "])";
+		case WRITE:
+			return os << "WRITE";
+		case READ:
+			return os << "READ";
+		case DEBUG:
+			return os << "DEBUG";
+		case SCAN:
+			return os << "SCAN(" << a.value << ")";
+		case HALT:
+			return os << "HALT";
+		case SET_C:
+			return os << "SET(p[" << a.lRef << "]=" << a.value << ")";
+		case JUMP_C:
+			return os << "JUMP(" << a.value << ")";
+		case JUMP_O:
+			return os << "JUMP(" << a.value << ")";
+		case NO_OP:
+			return os << "NO_OP";
+			break;
+		case TAPE_M:
+			return os << "MOV(" << a.value << ")";
+			break;
+		case INCR_C:
+			return os << "INCR(p[" << a.lRef << "]+=" << a.value << ")";
+			break;
 	}
-	return true;
+	return os;
 }
 
-bool isSimpleLoop(std::span<Instruction> code, std::map<int, int>& delta) {
-	if (!isLoop(code)) { return false; }
-	code = code.subspan(1, code.size() - 2);
+struct LoopInfo {
+	bool loop = false, innerMost = false, io = false;
+	int shift = 0;
+	std::map<int, int> delta;
+	std::map<int, std::set<int>> parent;
+};
 
+LoopInfo loopInfo(std::span<Instruction> code) {
+	LoopInfo info;
+	if (code.empty()) { return info; }
+	if (code.front().code != JUMP_C) { return info; }
+	if (code.back().code != JUMP_O) { return info; }
+	code = code.subspan(1, code.size() - 2);
+	if (code.empty()) { return info; }
+	info.loop = true;
+
+	auto& delta = info.delta;
+	auto& shift = info.shift;
 	delta.clear();
 
-	int tapePtr = 0;
 	for (auto& e : code) {
 		switch (e.code) {
-			case INCR_R:
+			case JUMP_C:
+			case JUMP_O:
+			case SCAN:
+			case HALT:
+				return info;
 			case WRITE:
 			case READ:
 			case DEBUG:
-			case SCAN:
-			case HALT:
-			case SET_C:
-				return false;
-			case JUMP_C:
-			case JUMP_O:
-			case NO_OP:
-				break;
+				info.io = true;
+				return info;
 			case TAPE_M:
-				tapePtr += e.value;
+				shift += e.value;
 				break;
 			case INCR_C:
-				delta[tapePtr] += e.value;
+				delta[info.shift] += e.value;
+				break;
+			case INCR_R:
+				info.parent[info.shift + e.lRef].insert(info.shift + e.rRef);
+				break;
+			case SET_C:
+				delta.erase(info.shift + e.lRef);
+				info.parent[info.shift + e.lRef].insert(info.shift + e.lRef);
+				break;
+			case NO_OP:
 				break;
 		}
 	}
-	return tapePtr == 0 && (delta[0] == -1 || delta[0] == 1);
+	info.innerMost = true;
+	return info;
 }
 
-bool isScanLoop(std::span<Instruction> code, int& jump) {
-	if (!isLoop(code)) { return false; }
-	code = code.subspan(1, code.size() - 2);
-	jump = 0;
-	for (auto& e : code) {
-		switch (e.code) {
-			case TAPE_M:
-				jump += e.value;
-				break;
-			case SCAN:
-			case INCR_R:
-			case WRITE:
-			case READ:
-			case DEBUG:
-			case HALT:
-			case SET_C:
-			case JUMP_C:
-			case JUMP_O:
-			case INCR_C:
-				return false;
-			case NO_OP:
-				break;
-		}
-	}
-	return true;
+bool isInnerMostLoop(const LoopInfo& info) {
+	return info.loop && info.innerMost;
+}
+
+bool isSimpleLoop(const LoopInfo& info) {
+	return info.loop && !info.io && info.shift == 0 &&	//
+		   info.parent.empty() &&						//
+		   info.delta.find(0) != info.delta.end() &&	//
+		   info.delta.at(0) == -1;
+}
+
+bool isScanLoop(const LoopInfo& info) {
+	return info.loop && !info.io && info.shift != 0 &&	//
+		   info.delta.empty() &&						//
+		   info.parent.empty();
 }
 
 class Program {
 	std::optional<std::string> err;
 	std::vector<Instruction> program;
-	std::string sourceCode;
 	std::vector<int> srcToProgram;
 
 	void aggregate() {
@@ -209,7 +224,6 @@ class Program {
 				ch = '\0';
 			}
 
-			sourceCode.push_back(ch);
 			srcToProgram.push_back(static_cast<int>(program.size() - 1));
 
 			if (inst.code == JUMP_C) {
@@ -252,20 +266,22 @@ class Program {
 		for (const auto& loop : loops) {
 			auto start = loop.second;
 			auto count = loop.first;
+			auto end = program[start].value + start + 1;
 
 			constexpr auto WIDTH = 5;
-			auto begin = getProgramToCode(start);
+
 			std::cout << std::setw(WIDTH) << start << " : ";
-			for (auto i = begin; sourceCode[i] != ']'; ++i) {
-				std::cout << sourceCode[i];
+
+			for (auto i = start; i < end; ++i) {
+				std::cout << program[i] << ',';
 			}
-			std::cout << "] : " << count << "\n";
+			std::cout << " : " << count << "\n";
 		}
 	}
 
-	void optimizeInnerLoops(
-		const std::function<bool(
-			std::span<Instruction>, std::vector<Instruction>&)>& optimizer) {
+	void optimizeInnerLoops(const std::function<bool(
+								const LoopInfo&, std::span<Instruction>,
+								std::vector<Instruction>&)>& optimizer) {
 		std::vector<Instruction> p, newCode;
 		std::vector<int> stack;
 
@@ -286,7 +302,8 @@ class Program {
 			auto begin = p.end() + p.back().value - 1;
 			auto end = p.end();
 			std::span<Instruction> code(begin, end);
-			if (isInnerMostLoop(code) && optimizer(code, newCode)) {
+			auto info = loopInfo(code);
+			if (isInnerMostLoop(info) && optimizer(info, code, newCode)) {
 				p.erase(begin, end);
 				p.insert(p.end(), newCode.begin(), newCode.end());
 				newCode.clear();
@@ -315,31 +332,33 @@ class Program {
 
 	void printProfileInfo(std::span<int> runCounts) {
 		constexpr auto WIDTH = 5;
-		std::map<int, int> delta;
-		int scanJump = 0;
 		if (runCounts.size() != program.size()) {
 			throw std::runtime_error(
 				"Mismatch in length of runCounts and program");
 		}
 		std::cout << "\n==============Profile Info==============\n";
-		for (auto i = sourceCode.size(); i < sourceCode.size(); ++i) {
-			if (sourceCode[i] == '\0') { continue; }
-			std::cout << std::setw(WIDTH) << i << " : " << sourceCode[i]
-					  << " : " << runCounts[srcToProgram[i]] << "\n";
+		for (auto i = 0u; i < program.size(); ++i) {
+			std::cout << std::setw(WIDTH) << i << " : " << program[i] << " : "
+					  << runCounts[i] << "\n";
 		}
 		std::vector<std::pair<int, int>> simple, notSimple, scan;
 		for (auto i = 0u; i < program.size(); ++i) {
 			const auto& instr = program[i];
 			if (instr.code != JUMP_C) { continue; }
+			const auto runCount = runCounts[i + instr.value];
+
 			std::span<Instruction> code(
 				program.begin() + i, program.begin() + i + instr.value + 1);
-			if (!isInnerMostLoop(code)) { continue; }
-			if (isSimpleLoop(code, delta)) {
-				simple.emplace_back(runCounts[i], i);
-			} else if (isScanLoop(code, scanJump)) {
-				scan.emplace_back(runCounts[i], i);
+
+			auto info = loopInfo(code);
+
+			if (!isInnerMostLoop(info)) { continue; }
+			if (isSimpleLoop(info)) {
+				simple.emplace_back(runCount, i);
+			} else if (isScanLoop(info)) {
+				scan.emplace_back(runCount, i);
 			} else {
-				notSimple.emplace_back(runCounts[i], i);
+				notSimple.emplace_back(runCount, i);
 			}
 		}
 
@@ -349,9 +368,9 @@ class Program {
 	}
 
 	void optimizeSimpleLoops() {
-		optimizeInnerLoops([](auto code, auto& newCode) {
-			std::map<int, int> delta;
-			if (!isSimpleLoop(code, delta)) { return false; }
+		optimizeInnerLoops([](auto& info, auto, auto& newCode) {
+			if (!isSimpleLoop(info)) { return false; }
+			auto delta = info.delta;
 			int change = -delta[0];
 			delta.erase(0);
 			newCode.reserve(delta.size());
@@ -364,9 +383,9 @@ class Program {
 	}
 
 	void optimizeScans() {
-		optimizeInnerLoops([](auto code, auto& newCode) {
-			int scanJump = 0;
-			if (!isScanLoop(code, scanJump)) { return false; }
+		optimizeInnerLoops([](auto& info, auto, auto& newCode) {
+			if (!isScanLoop(info)) { return false; }
+			int scanJump = info.shift;
 			newCode.push_back({SCAN, 0, 0, scanJump});
 			return true;
 		});
