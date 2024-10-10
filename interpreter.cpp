@@ -107,10 +107,6 @@ auto run(std::span<Instruction> code) {
 				ptr += inst.value;
 				break;
 
-			case INCR_C:
-				tape[ptr + inst.lRef] += inst.value;
-				break;
-
 			case SCAN: {
 				ptr += scan(tape, ptr, inst.value);
 				break;
@@ -136,9 +132,12 @@ auto run(std::span<Instruction> code) {
 				if (tape[ptr] != 0) { itr += inst.value; }
 				break;
 
-			case INCR_R:
-				tape[ptr + inst.lRef] += inst.value * tape[ptr + inst.rRef];
+			case INCR: {
+				DATA_TYPE t = inst.value;
+				for (auto& r : inst.rRef) { t *= tape[ptr + r]; }
+				tape[ptr + inst.lRef] += t;
 				break;
+			}
 
 			case DEBUG: {
 				std::cout << "tape[" << ptr << "] = " << (int)tape[ptr]

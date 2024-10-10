@@ -16,13 +16,12 @@ using DATA_TYPE = unsigned char;
 enum Inst_Codes {
 	NO_OP = 0,
 	TAPE_M,	 // Tape Movement
-	INCR_C,	 // Increment by constant
-	INCR_R,	 // Increment by reference (reference is relative)
+	INCR,	 // Increment by product of constant and reference
+	SET_C,	 // Set to constant
 	WRITE,
 	READ,
 	JUMP_C,	 // Jump to closing bracket
 	JUMP_O,	 // Jump to opening bracket
-	SET_C,	 // Set to constant
 	SCAN,	 // Scan for 0
 	DEBUG,
 	HALT,
@@ -30,41 +29,43 @@ enum Inst_Codes {
 
 struct Instruction {
 	Inst_Codes code = Inst_Codes::NO_OP;
-	int lRef = 0, rRef = 0;
+	int lRef = 0;
 	int value = 0;
+	std::vector<int> rRef;
 };
 
 Instruction getInstruction(char ch) {
 	switch (ch) {
 		case '>':
-			return {Inst_Codes::TAPE_M, 0, 0, +1};
+			return {Inst_Codes::TAPE_M, 0, +1, {}};
 		case '<':
-			return {Inst_Codes::TAPE_M, 0, 0, -1};
+			return {Inst_Codes::TAPE_M, 0, -1, {}};
 		case '+':
-			return {Inst_Codes::INCR_C, 0, 0, +1};
+			return {Inst_Codes::INCR, 0, +1, {}};
 		case '-':
-			return {Inst_Codes::INCR_C, 0, 0, -1};
+			return {Inst_Codes::INCR, 0, -1, {}};
 		case '.':
-			return {Inst_Codes::WRITE, 0, 0, 0};
+			return {Inst_Codes::WRITE, 0, 0, {}};
 		case ',':
-			return {Inst_Codes::READ, 0, 0, 0};
+			return {Inst_Codes::READ, 0, 0, {}};
 		case '[':
-			return {Inst_Codes::JUMP_C, 0, 0, 0};
+			return {Inst_Codes::JUMP_C, 0, 0, {}};
 		case ']':
-			return {Inst_Codes::JUMP_O, 0, 0, 0};
+			return {Inst_Codes::JUMP_O, 0, 0, {}};
 		case '$':
-			return {Inst_Codes::DEBUG, 0, 0, 0};
+			return {Inst_Codes::DEBUG, 0, 0, {}};
 	}
-	return {Inst_Codes::NO_OP, 0, 0, 0};
+	return {Inst_Codes::NO_OP, 0, 0, {}};
 }
 
 // #define LOG_INST 1
 
 std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 	switch (a.code) {
-		case INCR_R:
-			return os << "INCR(p[" << a.lRef << "]+=" << a.value << "*p["
-					  << a.rRef << "])";
+		case INCR:
+			os << "INCR(p[" << a.lRef << "]+=" << a.value;
+			for (const auto& e : a.rRef) { os << "*p[" << e << "]"; }
+			return os << ")";
 		case WRITE:
 			return os << "WRITE";
 		case READ:
@@ -86,9 +87,6 @@ std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 			break;
 		case TAPE_M:
 			return os << "MOV(" << a.value << ")";
-			break;
-		case INCR_C:
-			return os << "INCR(p[" << a.lRef << "]+=" << a.value << ")";
 			break;
 	}
 	return os;
@@ -129,11 +127,14 @@ LoopInfo loopInfo(std::span<Instruction> code) {
 			case TAPE_M:
 				shift += e.value;
 				break;
-			case INCR_C:
-				delta[info.shift] += e.value;
-				break;
-			case INCR_R:
-				info.parent[info.shift + e.lRef].insert(info.shift + e.rRef);
+			case INCR:
+				if (e.rRef.empty()) {
+					delta[info.shift] += e.value;
+				} else {
+					for (auto& r : e.rRef) {
+						info.parent[info.shift + e.lRef].insert(info.shift + r);
+					}
+				}
 				break;
 			case SET_C:
 				delta.erase(info.shift + e.lRef);
@@ -173,8 +174,8 @@ class Program {
 		if (program.size() < 2) { return; }
 		auto& b = program.back();
 		auto& a = program[program.size() - 2];
-		if (a.code == b.code && a.code == Inst_Codes::INCR_C &&
-			a.lRef == b.lRef) {
+		if (a.code == b.code && a.code == Inst_Codes::INCR &&
+			a.lRef == b.lRef && a.rRef.empty() && b.rRef.empty()) {
 			a.value += b.value;
 			program.pop_back();
 			return;
@@ -211,7 +212,7 @@ class Program {
 			if (input.get(ch)) {
 				inst = getInstruction(ch);
 			} else {
-				inst = {Inst_Codes::HALT, 0, 0, 0};
+				inst = {Inst_Codes::HALT, 0, 0, {}};
 			}
 
 			if (inst.code != NO_OP) {
@@ -375,9 +376,9 @@ class Program {
 			delta.erase(0);
 			newCode.reserve(delta.size());
 			for (auto& e : delta) {
-				newCode.push_back({INCR_R, e.first, 0, change * e.second});
+				newCode.push_back({INCR, e.first, change * e.second, {0}});
 			}
-			newCode.push_back({SET_C, 0, 0, 0});
+			newCode.push_back({SET_C, 0, 0, {}});
 			return true;
 		});
 	}
@@ -386,7 +387,7 @@ class Program {
 		optimizeInnerLoops([](auto& info, auto, auto& newCode) {
 			if (!isScanLoop(info)) { return false; }
 			int scanJump = info.shift;
-			newCode.push_back({SCAN, 0, 0, scanJump});
+			newCode.push_back({SCAN, 0, scanJump, {}});
 			return true;
 		});
 	}

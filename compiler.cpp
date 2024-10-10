@@ -115,24 +115,34 @@ main:
 			case SET_C:
 				print(output, "	mov BYTE PTR tape[rbx], %", i.value);
 				break;
-			case INCR_C:
-				print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-				print(output, "	add ecx, %", mod(i.value));
-				print(output, "	mov BYTE PTR tape[rbx], cl");
-				break;
-			case INCR_R:
-				if (i.value == 1) {
+			case INCR:
+				if (i.rRef.empty()) {
 					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-					print(output, "	add BYTE PTR tape[rbx+%], cl", i.lRef);
-				} else if (i.value == -1) {
-					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-					print(output, "	sub BYTE PTR tape[rbx+%], cl", i.lRef);
-
+					print(output, "	add ecx, %", mod(i.value));
+					print(output, "	mov BYTE PTR tape[rbx], cl");
 				} else {
-					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-					print(output, "	mov eax, %", i.value);
-					print(output, "	imul eax, ecx");
-					print(output, "	add BYTE PTR tape[rbx+%], al", i.lRef);
+					bool firstDone = false;
+					if (i.value == 1 || i.value == -1) {
+						print(
+							output, "	movzx eax, BYTE PTR tape[rbx+%]",
+							i.rRef.front());
+						firstDone = true;
+					} else {
+						print(output, "	mov eax, %", i.value);
+					}
+					for (auto& e : i.rRef) {
+						if (firstDone) {
+							firstDone = false;
+							continue;
+						}
+						print(output, "	movzx ecx, BYTE PTR tape[rbx+%]", e);
+						print(output, "	imul eax, ecx");
+					}
+					if (i.value == -1) {
+						print(output, "	sub BYTE PTR tape[rbx+%], al", i.lRef);
+					} else {
+						print(output, "	add BYTE PTR tape[rbx+%], al", i.lRef);
+					}
 				}
 				break;
 			case WRITE:
