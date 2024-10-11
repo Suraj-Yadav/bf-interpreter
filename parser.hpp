@@ -5,11 +5,15 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <random>
 #include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "math.hpp"
+#include "util.hpp"
 
 using DATA_TYPE = unsigned char;
 
@@ -58,7 +62,7 @@ Instruction getInstruction(char ch) {
 	return {Inst_Codes::NO_OP, 0, 0, {}};
 }
 
-// #define LOG_INST 1
+#define LOG_INST 1
 
 std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 	switch (a.code) {
@@ -92,38 +96,30 @@ std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 	return os;
 }
 
-struct LoopInfo {
-	bool loop = false, innerMost = false, io = false;
+struct CodeInfo {
+	bool loop = false, innerMost = false, complex = false, empty = true,
+		 hasJumps = false;
 	int shift = 0;
 	std::map<int, int> delta;
 	std::map<int, std::set<int>> parent;
 };
 
-LoopInfo loopInfo(std::span<Instruction> code) {
-	LoopInfo info;
-	if (code.empty()) { return info; }
-	if (code.front().code != JUMP_C) { return info; }
-	if (code.back().code != JUMP_O) { return info; }
-	code = code.subspan(1, code.size() - 2);
-	if (code.empty()) { return info; }
-	info.loop = true;
-
+CodeInfo codeInfo(std::span<Instruction> code) {
+	if (code.empty()) { return {}; }
+	CodeInfo info;
 	auto& delta = info.delta;
 	auto& shift = info.shift;
 	delta.clear();
 
 	for (auto& e : code) {
 		switch (e.code) {
-			case JUMP_C:
-			case JUMP_O:
 			case SCAN:
-			case HALT:
-				return info;
 			case WRITE:
 			case READ:
 			case DEBUG:
-				info.io = true;
-				return info;
+			case HALT:
+				info.complex = true;
+				break;
 			case TAPE_M:
 				shift += e.value;
 				break;
@@ -140,29 +136,294 @@ LoopInfo loopInfo(std::span<Instruction> code) {
 				delta.erase(info.shift + e.lRef);
 				info.parent[info.shift + e.lRef].insert(info.shift + e.lRef);
 				break;
+			case JUMP_C:
+			case JUMP_O:
+				info.hasJumps = true;
+				break;
 			case NO_OP:
 				break;
 		}
 	}
-	info.innerMost = true;
 	return info;
 }
 
-bool isInnerMostLoop(const LoopInfo& info) {
+CodeInfo loopInfo(std::span<Instruction> code) {
+	CodeInfo info;
+	if (code.empty()) { return info; }
+	if (code.front().code != JUMP_C) { return info; }
+	if (code.back().code != JUMP_O) { return info; }
+	code = code.subspan(1, code.size() - 2);
+	info = codeInfo(code);
+	info.loop = true;
+	info.innerMost = !info.hasJumps;
+	return info;
+}
+
+bool isInnerMostLoop(const CodeInfo& info) {
 	return info.loop && info.innerMost;
 }
 
-bool isSimpleLoop(const LoopInfo& info) {
-	return info.loop && !info.io && info.shift == 0 &&	//
-		   info.parent.empty() &&						//
-		   info.delta.find(0) != info.delta.end() &&	//
+bool isSimpleLoop(const CodeInfo& info) {
+	return info.loop && !info.complex && info.shift == 0 &&	 //
+		   info.parent.empty() &&							 //
+		   info.delta.find(0) != info.delta.end() &&		 //
 		   info.delta.at(0) == -1;
 }
 
-bool isScanLoop(const LoopInfo& info) {
-	return info.loop && !info.io && info.shift != 0 &&	//
-		   info.delta.empty() &&						//
+bool isScanLoop(const CodeInfo& info) {
+	return info.loop && !info.complex && info.shift != 0 &&	 //
+		   info.delta.empty() &&							 //
 		   info.parent.empty();
+}
+
+bool mockRunner(std::span<Instruction> code, std::map<int, int>& tape) {
+	int ptr = 0;
+	int count = 0;
+	for (auto itr = code.begin(); itr != code.end(); itr++) {
+		if (count >= 512) { return false; }
+		const auto& i = *itr;
+		switch (i.code) {
+			case TAPE_M:
+				ptr += i.value;
+				break;
+
+			case SET_C:
+				tape[ptr] = i.value;
+				break;
+
+			case JUMP_C:
+				if (tape[ptr] == 0) { itr += i.value; }
+				break;
+
+			case JUMP_O:
+				if (tape[ptr] != 0) {
+					itr += i.value;
+					count++;
+				}
+				break;
+
+			case INCR: {
+				int t = i.value;
+				for (const auto& r : i.rRef) { t *= tape[ptr + r]; }
+				tape[ptr + i.lRef] += t;
+				break;
+			}
+
+			case NO_OP:
+				break;
+			case SCAN:
+			case WRITE:
+			case READ:
+			case DEBUG:
+			case HALT:
+				return false;
+		}
+	}
+	return true;
+}
+
+auto solve(
+	std::span<Instruction> code, const std::set<std::multiset<int>>& terms,
+	const std::set<int>& variables) {
+	Matrix x(0, 0);
+
+	if (terms.size() > 20 || terms.size() <= 0) { return x; }
+	const int N = static_cast<int>(terms.size()),
+			  M = static_cast<int>(variables.size());
+
+	Matrix A(N, N), b(M, N);
+
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_int_distribution<> d(1, 10 * N);
+
+	std::map<int, int> tape;
+
+	// std::vector<std::vector<int>> points = {
+	// 	{1, 2, 4, 7},  //
+	// 	{2, 5, 5, 4},  //
+	// 	{5, 6, 1, 5},  //
+	// 	{3, 3, 6, 5},  //
+	// 	{6, 1, 6, 6},  //
+	// 	{6, 4, 4, 1},  //
+	// 	{7, 7, 4, 6}};
+
+	for (auto i = 0; i < N; ++i) {
+		// Set Tape with random numbers
+
+		for (const auto& e : variables) {  //
+			tape[e] = d(gen);
+		}
+
+		// for (int j = 0; const auto& e : variables) {  //
+		// 	tape[e] = points[i][j++];
+		// }
+
+		for (int j = 0; const auto& e : terms) {
+			int v = 1;
+			for (const auto& f : e) { v *= tape[f]; }
+			A[i][j++] = v;
+		}
+
+		if (!mockRunner(code, tape)) { return x; }
+		for (int j = 0; const auto& e : variables) {  //
+			b[j++][i] = tape[e];
+		}
+	}
+
+	x = solve(A, b);
+
+	// debug("A = %", A);
+	// debug("b = %", b);
+	// debug("x = %", x);
+
+	return x;
+}
+
+std::vector<int> order(
+	const Matrix& x, const std::set<std::multiset<int>>& terms,
+	const std::set<int>& variables) {
+	std::vector<std::set<int>> incoming(variables.size());
+	std::vector<std::set<int>> outgoing(variables.size());
+	std::vector<int> topo;
+	std::set<int> S;
+	std::map<int, int> ind;
+	for (int i = 0; const auto& v : variables) { ind[v] = i++; }
+	for (const auto& v : variables) {
+		auto i = ind[v];
+		for (int j = 0; const auto& t : terms) {
+			if (x[i][j].get_den() != 1) { return {}; }
+			for (const auto& f : t) {
+				if (x[i][j] != 0 && f != v) {
+					incoming[i].insert(ind[f]);
+					outgoing[ind[f]].insert(i);
+				}
+			}
+			j++;
+		}
+		if (incoming[i].empty()) { S.insert(i); }
+	}
+
+	while (!S.empty()) {
+		auto u = *S.begin();
+		S.erase(S.begin());
+		topo.push_back(u);
+		for (const auto& v : outgoing[u]) {
+			incoming[v].erase(u);
+			if (incoming[v].empty()) { S.insert(v); }
+		}
+	}
+
+	for (auto& e : incoming) {
+		if (!e.empty()) { return {}; }
+	}
+	std::reverse(topo.begin(), topo.end());
+	return topo;
+}
+
+bool linearTest(
+	std::span<Instruction> code, std::vector<Instruction>& newCode) {
+	std::set<std::multiset<int>> terms;
+	std::set<int> variables;
+	auto loopBody = code.subspan(1, code.size() - 2);
+	int shift = 0;
+	for (auto& i : loopBody) {
+		if (i.code == TAPE_M) {
+			shift += i.value;
+		} else if (i.code == INCR) {
+			std::multiset<int> term;
+			for (auto& e : i.rRef) {
+				term.insert(e + shift);
+				variables.insert(e + shift);
+			}
+			terms.insert(term);
+			term.insert(0);
+			terms.insert(term);
+			terms.insert({i.lRef + shift});
+			variables.insert(i.lRef + shift);
+
+		} else if (i.code == SET_C) {
+			terms.insert({});
+			terms.insert({0});
+			terms.insert({i.lRef + shift});
+			variables.insert(i.lRef + shift);
+		} else {
+			return false;
+		}
+	}
+	if (shift != 0) { return false; }
+	variables.insert(0);
+
+	auto x = solve(loopBody, terms, variables);
+	if (x.rows() == 0) { return false; }
+
+	int loopVariable = 0;
+	{  // We need to check if the loop variable (say, w) is
+		// of this form w = w - 1
+		// want is the matrix form of w - 1 from terms
+		// loopVariable finds the index of w in variables
+		for (const auto& e : variables) {
+			if (e == 0) { break; }
+			loopVariable++;
+		}
+		Matrix want(1, terms.size());
+		for (int i = 0; const auto& t : terms) {
+			if (t.size() == 0) {
+				want[0][i] = -1;
+			} else if (t.size() == 1 && *t.begin() == 0) {
+				want[0][i] = 1;
+			}
+			i++;
+		}
+		// debug("want = %", want);
+		if (want[0] != x[loopVariable]) { return false; }
+	}
+
+	// Finally we can solve for loop
+	x = solve(code, terms, variables);
+
+	if (x.rows() == 0) { return false; }
+
+	// for (const auto& t : terms) {
+	// 	std::cout << "c";
+	// 	for (const auto& f : t) { std::cout << "*p[" << f << "]"; }
+	// 	std::cout << "+";
+	// }
+	// std::cout << std::endl;
+	// for (auto& v : variables) { std::cout << v << "\n"; }
+	// Simply generating instructs from x is not enough
+	// they need to be generated in proper order as we
+	// are making changes in place
+	auto ord = order(x, terms, variables);
+
+	if (ord.size() == 0) { return false; }
+
+	// return true;
+	{
+		std::vector<std::multiset<int>> terms_vec(terms.begin(), terms.end());
+		std::vector<int> variables_vec(variables.begin(), variables.end());
+
+		newCode.push_back({JUMP_C, 0, 0, {}});
+
+		for (auto& i : ord) {
+			auto v = variables_vec[i];
+			for (auto j = 0u; j < terms.size(); ++j) {
+				Instruction inst;
+				inst.code = INCR;
+				inst.lRef = v;
+				const auto& factor = terms_vec[j];
+				if (factor.size() == 1 && *factor.begin() == v) { x[i][j]--; }
+				inst.value = x[i][j].get_num().get_si();
+				inst.rRef.insert(inst.rRef.end(), factor.begin(), factor.end());
+				if (x[i][j] != 0) { newCode.push_back(inst); }
+			}
+		}
+
+		newCode.front().value = newCode.size();
+		newCode.push_back({JUMP_O, -1, -newCode.front().value, {}});
+	}
+
+	return true;
 }
 
 class Program {
@@ -281,7 +542,7 @@ class Program {
 	}
 
 	void optimizeInnerLoops(const std::function<bool(
-								const LoopInfo&, std::span<Instruction>,
+								const CodeInfo&, std::span<Instruction>,
 								std::vector<Instruction>&)>& optimizer) {
 		std::vector<Instruction> p, newCode;
 		std::vector<int> stack;
@@ -353,7 +614,7 @@ class Program {
 
 			auto info = loopInfo(code);
 
-			if (!isInnerMostLoop(info)) { continue; }
+			// if (!isInnerMostLoop(info)) { continue; }
 			if (isSimpleLoop(info)) {
 				simple.emplace_back(runCount, i);
 			} else if (isScanLoop(info)) {
@@ -389,6 +650,26 @@ class Program {
 			int scanJump = info.shift;
 			newCode.push_back({SCAN, 0, scanJump, {}});
 			return true;
+		});
+	}
+
+	void linearLoops() {
+		int i = 0;
+		std::ofstream before("/tmp/before.bfas");
+		std::ofstream after("/tmp/after.bfas");
+		optimizeInnerLoops([&](auto&, auto code, auto& newCode) {
+			auto x = linearTest(code, newCode);
+			if (x) {
+				print(before, "================%================", i);
+				print(after, "================%================", i);
+				for (auto& e : code) { print(before, "%", e); }
+				for (auto& e : newCode) { print(after, "%", e); }
+				print(before, "================%================", i);
+				print(after, "================%================", i);
+				i++;
+				debug("PING", 0);
+			}
+			return x;
 		});
 	}
 };

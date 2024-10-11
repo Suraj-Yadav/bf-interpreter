@@ -134,7 +134,7 @@ auto run(std::span<Instruction> code) {
 
 			case INCR: {
 				DATA_TYPE t = inst.value;
-				for (auto& r : inst.rRef) { t *= tape[ptr + r]; }
+				for (const auto& r : inst.rRef) { t *= tape[ptr + r]; }
 				tape[ptr + inst.lRef] += t;
 				break;
 			}
@@ -177,6 +177,7 @@ int main(int argc, char* argv[]) {
 
 	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
 	if (args.optimizeScans) { p.optimizeScans(); }
+	if (args.optimizeSecondLevelLoops) { p.linearLoops(); }
 
 	auto& code = p.instructions();
 

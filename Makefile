@@ -1,5 +1,5 @@
 
-CXXFLAGS := -Wall -Wextra -Wpedantic -std=c++20 -mavx512bw
+CXXFLAGS := -Wall -Wextra -Wpedantic -std=c++20 -mavx512bw -lgmpxx -lgmp
 
 build: bfi bfc bfi_g vec
 

@@ -9,7 +9,7 @@ template <typename S> inline void print(S& s, std::string_view fmt) {
 }
 
 template <typename S, typename T, typename... Args>
-void print(S& s, std::string_view fmt, T t, Args... args) {
+void print(S& s, std::string_view fmt, const T& t, Args... args) {
 	auto i = fmt.find('%');
 	s << fmt.substr(0, i);
 	fmt.remove_prefix(i);
@@ -22,12 +22,16 @@ void print(S& s, std::string_view fmt, T t, Args... args) {
 	print(s, fmt, args...);
 }
 
+#define debug(FMT, ...) \
+	print(std::cout, "%:%: " FMT, __FILE__, __LINE__, __VA_ARGS__)
+
 struct Args {
 	std::filesystem::path input;
 	std::filesystem::path output;
 	bool profile = false;
 	bool optimizeSimpleLoops = true;
 	bool optimizeScans = true;
+	bool optimizeSecondLevelLoops = true;
 };
 
 Args argparse(int argc, char* argv[]) {
@@ -43,6 +47,8 @@ Args argparse(int argc, char* argv[]) {
 			a.optimizeSimpleLoops = false;
 		} else if (arg == "--no-scan-optimize") {
 			a.optimizeScans = false;
+		} else if (arg == "--no-second-level-loop-optimize") {
+			a.optimizeSecondLevelLoops = false;
 		} else if (a.input.empty()) {
 			a.input = arg;
 		}
@@ -50,7 +56,6 @@ Args argparse(int argc, char* argv[]) {
 	}
 	return a;
 }
-
 
 template <typename T> T revBits(T v) {
 	auto r = v;
@@ -63,4 +68,3 @@ template <typename T> T revBits(T v) {
 	r <<= s;
 	return r;
 }
-

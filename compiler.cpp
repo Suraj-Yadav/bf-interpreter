@@ -161,8 +161,10 @@ main:
 				print(output, ".LOC%:", loc);
 				break;
 			case JUMP_O:
-				print(output, "	cmp BYTE PTR tape[rbx], 0");
-				print(output, "	jne .LOC%", loc + i.value);
+				if (i.lRef == 0) {
+					print(output, "	cmp BYTE PTR tape[rbx], 0");
+					print(output, "	jne .LOC%", loc + i.value);
+				}
 				print(output, ".LOC%:", loc);
 				break;
 			case SCAN:
@@ -210,6 +212,7 @@ int main(int argc, char* argv[]) {
 
 	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
 	if (args.optimizeScans) { p.optimizeScans(); }
+	if (args.optimizeSecondLevelLoops) { p.linearLoops(); }
 
 	auto outputPath =
 		std::filesystem::temp_directory_path() / "tmp-bf-assembly.s";
