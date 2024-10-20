@@ -23,7 +23,7 @@ void print(S& s, std::string_view fmt, const T& t, Args... args) {
 }
 
 #define debug(FMT, ...) \
-	print(std::cout, "%:%: " FMT, __FILE__, __LINE__, __VA_ARGS__)
+	print(std::cerr, "%:%: " FMT, __FILE__, __LINE__, __VA_ARGS__)
 
 struct Args {
 	std::filesystem::path input;

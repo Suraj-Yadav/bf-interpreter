@@ -28,17 +28,39 @@ def multiply(w, x, y, z):
     return w, x, y, z
 
 
+def test(w, x, y, z):
+    while w != 0:
+        y = 0
+        x += w
+        y += w
+        w = 0
+        w += y
+        y = 0
+        w = w - 1
+    return w, x, y, z
+
+
+def f(v0, vn8, vn7, vn9):
+    while v0 != 0:
+        v0 = v0 + -1
+        vn8 = vn8 + 1
+        vn8 += vn7
+        vn9 += vn7
+        vn7 = 0
+        vn7 += vn8
+        vn8 = 0
+    return v0, vn8, vn7, vn9
+
+
 # what we want to solve for
 def function(w, x, y, z):
-    return fibo(w, x, y, z)
+    return f(w, x, y, z)
 
 
 v = (1 + x + x * x) * (1 + y + y * y) * (1 + z + z * z) * (1 + w + w * w)
 # Limit v to terms which are at max degree of 2
 v = v.expand().as_terms()
-v = [1, w, w * x, w * y, x, y, z]
-
-print(v)
+v = [1, w, w * w, x, y, z, w * x, w * y, w * z]
 
 # Generate coeff for each term
 coeffs = [sp.symbols(f"c{i}") for i in range(len(v))]

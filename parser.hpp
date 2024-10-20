@@ -189,7 +189,7 @@ bool mockRunner(std::span<Instruction> code, std::map<int, int>& tape) {
 				break;
 
 			case SET_C:
-				tape[ptr] = i.value;
+				tape[ptr + i.lRef] = i.value;
 				break;
 
 			case JUMP_C:
@@ -249,7 +249,7 @@ auto solve(
 
 	// std::vector<std::vector<int>> points = {
 	// };
-
+	
 	for (auto i = 0; i < S; ++i) {
 		// Set Tape with random numbers
 		for (const auto& e : variables) {  //
@@ -259,7 +259,7 @@ auto solve(
 		// for (int j = 0; const auto& e : variables) {  //
 		// 	tape[e] = points[i][j++];
 		// }
-
+		
 		for (int j = 0; const auto& e : terms) {
 			A[i][j] = 1;
 			for (const auto& f : e) { A[i][j] *= tape[f]; }
