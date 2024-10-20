@@ -113,7 +113,7 @@ main:
 				print(output, "	add rbx, %", i.value);
 				break;
 			case SET_C:
-				print(output, "	mov BYTE PTR tape[rbx], %", i.value);
+				print(output, "	mov BYTE PTR tape[rbx+%], %", i.lRef, i.value);
 				break;
 			case INCR:
 				if (i.rRef.empty()) {

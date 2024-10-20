@@ -3,16 +3,16 @@ CXXFLAGS := -Wall -Wextra -Wpedantic -std=c++20 -mavx512bw -lgmpxx -lgmp
 
 build: bfi bfc bfi_g vec
 
-bfi: interpreter.cpp parser.hpp
+bfi: interpreter.cpp parser.hpp math.hpp 
 	g++ -Ofast $(CXXFLAGS) interpreter.cpp -o ./bfi
 
-bfi_g: interpreter.cpp parser.hpp
+bfi_g: interpreter.cpp parser.hpp math.hpp
 	g++ -g $(CXXFLAGS) interpreter.cpp -o ./bfi_g
 
-bfc: compiler.cpp parser.hpp
+bfc: compiler.cpp parser.hpp math.hpp
 	g++ -g $(CXXFLAGS) compiler.cpp -o ./bfc
 
-vec: vec_test.cpp 
+vec: vec_test.cpp
 	g++ -O3 $(CXXFLAGS) vec_test.cpp -o vec
 	g++ -g  $(CXXFLAGS) vec_test.cpp -o vec_g
 

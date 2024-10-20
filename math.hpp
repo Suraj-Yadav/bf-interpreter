@@ -1,24 +1,40 @@
 #include <gmpxx.h>
 
 #include <cassert>
-#include <numeric>
 #include <ostream>
 #include <vector>
 
-using T = mpq_class;
+using D = mpq_class;
 class Matrix {
-	std::vector<std::vector<T>> mat;
+	std::vector<std::vector<D>> mat;
 
    public:
 	Matrix(size_t r, size_t c) {
 		mat.clear();
-		mat.resize(r, std::vector<T>(c, 0));
+		resize(r, c);
 	}
 	[[nodiscard]] auto rows() const { return mat.size(); }
 	[[nodiscard]] auto cols() const { return mat[0].size(); }
+	[[nodiscard]] auto isRowZero(size_t row) {
+		return std::ranges::all_of(mat[row], [](auto i) { return i == 0; });
+	}
 
-	std::vector<T>& operator[](size_t row) { return mat[row]; }
-	const std::vector<T>& operator[](size_t row) const { return mat[row]; }
+	std::vector<D>& operator[](size_t row) { return mat[row]; }
+	const std::vector<D>& operator[](size_t row) const { return mat[row]; }
+
+	void resize(size_t r, size_t c) {
+		for (auto& row : mat) { row.resize(c, 0); }
+		mat.resize(r, std::vector<D>(c, 0));
+	}
+
+	[[nodiscard]] Matrix T() const {
+		if (rows() == 0 || cols() == 0) { return {0, 0}; }
+		Matrix t(cols(), rows());
+		for (auto i = 0u; i < t.rows(); ++i) {
+			for (auto j = 0u; j < t.cols(); ++j) { t[i][j] = mat[j][i]; }
+		}
+		return t;
+	}
 };
 
 std::ostream& operator<<(std::ostream& os, const Matrix& m) {
@@ -29,56 +45,31 @@ std::ostream& operator<<(std::ostream& os, const Matrix& m) {
 	return os;
 }
 
-bool lup(Matrix& A, std::vector<int>& pi) {
-	const auto N = A.rows();
-	pi.resize(N);
-	std::iota(pi.begin(), pi.end(), 0);
+Matrix gaussian(Matrix A, Matrix b) {
+	assert(A.rows() == b.rows());
 
-	for (auto k = 0u; k < N; ++k) {
-		T p(0);
-		auto k1 = k;
-		for (auto i = k; i < N; ++i) {
-			if (abs(A[i][k]) > p) {
-				p = abs(A[i][k]);
-				k1 = i;
-			}
-		}
-		if (p == 0) { return false; }
-		std::swap(pi[k], pi[k1]);
-		std::swap(A[k], A[k1]);
-		for (auto i = k + 1; i < N; ++i) {
-			A[i][k] = A[i][k] / A[k][k];
-			for (auto j = k + 1; j < N; ++j) {
-				A[i][j] = A[i][j] - A[i][k] * A[k][j];
-			}
+	// S = # samples
+	// N = # coeffs to solve for
+	// M = # distinct linear systems to solve
+
+	const auto S = A.rows();
+	const auto N = A.cols();
+	const auto M = b.cols();
+	for (auto i = 0u; i < S && i < N; ++i) {
+		if (A[i][i] == 0) { return {0, 0}; }
+		auto t = A[i][i];
+		for (auto j = 0u; j < N; ++j) { A[i][j] /= t; }
+		for (auto j = 0u; j < M; ++j) { b[i][j] /= t; }
+		for (auto k = 0u; k < S; ++k) {
+			if (i == k) { continue; }
+			t = A[k][i];
+			for (auto j = 0u; j < N; ++j) { A[k][j] -= t * A[i][j]; }
+			for (auto j = 0u; j < M; ++j) { b[k][j] -= t * b[i][j]; }
 		}
 	}
-
-	return true;
-}
-
-Matrix solve(Matrix A, const Matrix& b) {
-	assert(A.rows() == b.cols());
-	std::vector<int> pi;
-
-	if (!lup(A, pi)) { return {0, 0}; }
-	const auto N = A.rows();
-	const auto M = b.rows();
-	std::vector<T> y(N, 0);
-	Matrix x(M, N);
-	for (auto k = 0u; k < M; ++k) {
-		for (auto i = 0u; i < N; ++i) {
-			y[i] = b[k][pi[i]];
-			for (auto j = 0u; j < i; ++j) { y[i] = y[i] - A[i][j] * y[j]; }
-		}
-		for (auto i = N - 1;; --i) {
-			for (auto j = i + 1; j < N; ++j) {
-				y[i] = y[i] - A[i][j] * x[k][j];
-			}
-			x[k][i] = y[i] / A[i][i];
-			if (i == 0) { break; }
-		}
+	for (auto i = N; i < S; ++i) {
+		if (!b.isRowZero(i)) { return {0, 0}; }
 	}
-
-	return x;
+	b.resize(N, M);
+	return b;
 }

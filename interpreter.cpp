@@ -113,7 +113,7 @@ auto run(std::span<Instruction> code) {
 			}
 
 			case SET_C:
-				tape[ptr] = inst.value;
+				tape[ptr + inst.lRef] = inst.value;
 				break;
 
 			case WRITE:

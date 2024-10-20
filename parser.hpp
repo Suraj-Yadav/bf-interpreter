@@ -232,9 +232,14 @@ auto solve(
 
 	if (terms.size() > VARIABLE_LIMIT || terms.size() <= 0) { return x; }
 	const int N = static_cast<int>(terms.size()),
-			  M = static_cast<int>(variables.size());
+			  M = static_cast<int>(variables.size()), S = N + 1;
 
-	Matrix A(N, N), b(M, N);
+	// S = # samples
+	// N = # coeffs to solve for
+	// M = # distinct linear systems to solve. one for each variable
+
+	// Matrix for solving Ax = b
+	Matrix A(S, N), b(S, M);
 
 	std::random_device rd;
 	std::mt19937 gen(rd());
@@ -243,17 +248,10 @@ auto solve(
 	std::map<int, int> tape;
 
 	// std::vector<std::vector<int>> points = {
-	// 	{1, 2, 4, 7},  //
-	// 	{2, 5, 5, 4},  //
-	// 	{5, 6, 1, 5},  //
-	// 	{3, 3, 6, 5},  //
-	// 	{6, 1, 6, 6},  //
-	// 	{6, 4, 4, 1},  //
-	// 	{7, 7, 4, 6}};
+	// };
 
-	for (auto i = 0; i < N; ++i) {
+	for (auto i = 0; i < S; ++i) {
 		// Set Tape with random numbers
-
 		for (const auto& e : variables) {  //
 			tape[e] = d(gen);
 		}
@@ -263,28 +261,28 @@ auto solve(
 		// }
 
 		for (int j = 0; const auto& e : terms) {
-			int v = 1;
-			for (const auto& f : e) { v *= tape[f]; }
-			A[i][j++] = v;
+			A[i][j] = 1;
+			for (const auto& f : e) { A[i][j] *= tape[f]; }
+			j++;
 		}
 
 		if (!mockRunner(code, tape)) { return x; }
 		for (int j = 0; const auto& e : variables) {  //
-			b[j++][i] = tape[e];
+			b[i][j++] = tape[e];
 		}
 	}
 
-	x = solve(A, b);
-
+	x = gaussian(A, b);
 	// debug("A = %", A);
 	// debug("b = %", b);
 	// debug("x = %", x);
 
-	return x;
+	// its easier to process transposed x
+	return x.T();
 }
 
 std::vector<int> order(
-	const Matrix& x, const std::set<std::multiset<int>>& terms,
+	const std::vector<std::map<std::multiset<int>, mpq_class>>& expressions,
 	const std::set<int>& variables) {
 	std::vector<std::set<int>> incoming(variables.size());
 	std::vector<std::set<int>> outgoing(variables.size());
@@ -296,14 +294,13 @@ std::vector<int> order(
 
 	for (const auto& v : variables) {
 		auto i = ind[v];
-		for (int j = 0; const auto& t : terms) {
-			for (const auto& f : t) {
-				if (x[i][j] != 0 && f != v) {
+		for (const auto& term : expressions[i]) {
+			for (const auto& f : term.first) {
+				if (f != v) {
 					incoming[i].insert(ind[f]);
 					outgoing[ind[f]].insert(i);
 				}
 			}
-			j++;
 		}
 		if (incoming[i].empty()) { S.insert(i); }
 	}
@@ -325,13 +322,12 @@ std::vector<int> order(
 	return topo;
 }
 
-bool linearTest(
-	std::span<Instruction> code, std::vector<Instruction>& newCode) {
-	std::set<std::multiset<int>> terms;
-	std::set<int> variables;
-	auto loopBody = code.subspan(1, code.size() - 2);
+bool extractVariables(
+	std::span<Instruction> code, std::set<std::multiset<int>>& terms,
+	std::set<int>& variables) {
+	code = code.subspan(1, code.size() - 2);
 	int shift = 0;
-	for (auto& i : loopBody) {
+	for (auto& i : code) {
 		switch (i.code) {
 			case TAPE_M: {
 				shift += i.value;
@@ -368,35 +364,68 @@ bool linearTest(
 				return false;
 		}
 	}
-	if (shift != 0) { return false; }
 	variables.insert(0);
+	return shift == 0;
+}
+
+auto rowToExpr(const std::set<std::multiset<int>>& terms, auto& row) {
+	std::map<std::multiset<int>, mpq_class> expr;
+	for (int i = 0; const auto& e : terms) {
+		if (row[i] != 0) { expr[e] = row[i]; }
+		i++;
+	}
+	return expr;
+}
+
+// check if the loop body makes this change
+// w = w - 1
+bool checkLoopBody(
+	std::span<Instruction> code, const std::set<std::multiset<int>>& terms,
+	const std::set<int>& variables) {
+	auto loopBody = code.subspan(1, code.size() - 2);
 
 	auto x = solve(loopBody, terms, variables);
 	if (x.rows() == 0) { return false; }
-
 	int loopVariable = 0;
-	{  // We need to check if the loop variable (say, w) is
-		// of this form w = w - 1
-		// want is the matrix form of w - 1 from terms
-		// loopVariable finds the index of w in variables
-		for (const auto& e : variables) {
-			if (e == 0) { break; }
-			loopVariable++;
-		}
-		Matrix want(1, terms.size());
-		for (int i = 0; const auto& t : terms) {
-			if (t.size() == 0) {
-				want[0][i] = -1;
-			} else if (t.size() == 1 && *t.begin() == 0) {
-				want[0][i] = 1;
-			}
-			i++;
-		}
-		if (want[0] != x[loopVariable]) { return false; }
+	for (const auto& e : variables) {
+		if (e == 0) { break; }
+		loopVariable++;
 	}
+	std::map<std::multiset<int>, mpq_class> want;
+	want[{}] = -1;
+	want[{0}] = 1;
+	// want = p[0] - 1;
+	return rowToExpr(terms, x[loopVariable]) == want;
+}
 
-	// Finally we can solve for loop
-	x = solve(code, terms, variables);
+auto computeExpressions(
+	const Matrix& x, const std::set<std::multiset<int>>& terms,
+	const std::set<int>& variables) {
+	std::vector<std::map<std::multiset<int>, mpq_class>> expressions(
+		variables.size());
+	for (auto i = 0u; const auto& v : variables) {
+		expressions[i] = rowToExpr(terms, x[i]);
+		// We can only increment tape cells, so subtract cell from it
+		expressions[i][{v}]--;
+		if (expressions[i][{v}] == 0) {	 //
+			expressions[i].erase({v});
+		}
+		i++;
+	}
+	return expressions;
+}
+
+bool linearTest(
+	std::span<Instruction> code, std::vector<Instruction>& newCode) {
+	std::set<std::multiset<int>> terms;
+	std::set<int> variables;
+
+	if (!extractVariables(code, terms, variables)) { return false; }
+
+	if (!checkLoopBody(code, terms, variables)) { return false; }
+
+	// Finally solve for loop
+	auto x = solve(code, terms, variables);
 
 	if (x.rows() == 0) { return false; }
 
@@ -410,48 +439,49 @@ bool linearTest(
 			if (x[i][j] > INT_MAX || x[i][j] < INT_MIN) { return false; }
 		}
 	}
-	// Simply generating instructs from x is not enough
-	// they need to be generated in proper order as we
-	// are making changes in place
-	auto ord = order(x, terms, variables);
+
+	auto expressions = computeExpressions(x, terms, variables);
+
+	// Simply generating instructs from expressions is not
+	// enough they need to be generated in proper order as
+	// changes are made in place
+	auto ord = order(expressions, variables);
 	// No order is possible
 	if (ord.size() == 0) { return false; }
 
-	{
-		std::vector<std::multiset<int>> terms_vec(terms.begin(), terms.end());
-		std::vector<int> variables_vec(variables.begin(), variables.end());
+	std::vector<int> vars(variables.begin(), variables.end());
+	newCode.push_back({JUMP_C, 0, 0, {}});
 
-		newCode.push_back({JUMP_C, 0, 0, {}});
+	bool canSkipCheck = true;
 
-		bool canSkipCheck = true;
-
-		for (auto& i : ord) {
-			auto v = variables_vec[i];
-			for (auto j = 0u; j < terms.size(); ++j) {
-				Instruction inst;
-				inst.code = INCR;
-				inst.lRef = v;
-				const auto& factor = terms_vec[j];
-				if (factor.size() == 1 && *factor.begin() == v) { x[i][j]--; }
-				inst.value = x[i][j].get_num().get_si();
-				inst.rRef.insert(inst.rRef.end(), factor.begin(), factor.end());
-				canSkipCheck = factor.contains(0) && canSkipCheck;
-				if (x[i][j] != 0) {
-					if (factor.size() == 1 && *factor.begin() == 0 && v == 0) {
-						inst.code = SET_C;
-						inst.value = 0;
-					}
-					newCode.push_back(inst);
-				}
-			}
+	for (auto& i : ord) {
+		auto& v = vars[i];
+		auto& expr = expressions[i];
+		if (expr.size() == 1 && expr.contains({v}) && expr[{v}] == -1) {
+			canSkipCheck = canSkipCheck && v == 0;
+			Instruction inst;
+			inst.code = SET_C;
+			inst.lRef = v;
+			inst.value = 0;
+			newCode.push_back(inst);
+			continue;
 		}
-
-		if (canSkipCheck) {
-			newCode.erase(newCode.begin());
-		} else {
-			newCode.front().value = newCode.size();
-			newCode.push_back({JUMP_O, -1, -newCode.front().value, {}});
+		for (auto& [term, coeff] : expressions[i]) {
+			canSkipCheck = canSkipCheck && term.contains(0);
+			Instruction inst;
+			inst.code = INCR;
+			inst.lRef = v;
+			inst.value = static_cast<int>(coeff.get_num().get_si());
+			inst.rRef.insert(inst.rRef.end(), term.begin(), term.end());
+			newCode.push_back(inst);
 		}
+	}
+
+	if (canSkipCheck) {
+		newCode.erase(newCode.begin());
+	} else {
+		newCode.front().value = newCode.size();
+		newCode.push_back({JUMP_O, -1, -newCode.front().value, {}});
 	}
 
 	return true;
@@ -605,9 +635,11 @@ class Program {
 			auto info = loopInfo(code);
 			if (isInnerMostLoop(info) && optimizer(info, code, newCode)) {
 #ifdef LOG_INST
+				for (auto& e : code) { print(before, "%", e); }
 				print(before, "================%================", count);
 				for (auto& e : code) { print(before, "%", e); }
 				print(before, "================%================", count);
+				for (auto& e : code) { print(after, "%", e); }
 				print(after, "================%================", count);
 				for (auto& e : newCode) { print(after, "%", e); }
 				print(after, "================%================", count);

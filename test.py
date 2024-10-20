@@ -20,8 +20,8 @@ def fibo(w, x, y, z):
 
 def multiply(w, x, y, z):
     while w != 0:
-        y += x
         z += x
+        y += x
         x = y
         y = 0
         w = w - 1
@@ -50,24 +50,16 @@ exp = 0
 for a, b in zip(coeffs, v):
     exp = exp + a * b
 # Generate some points for generating equations
-points = [
-    (1, 2, 4, 7),
-    (2, 5, 5, 4),
-    (5, 6, 1, 5),
-    (3, 3, 6, 5),
-    (6, 1, 6, 6),
-    (6, 4, 4, 1),
-    (7, 7, 4, 6),
-]
-# for i in range(len(coeffs)):
-#     points.append(
-#         (
-#             randint(1, 10),
-#             randint(1, 10),
-#             randint(1, 10),
-#             randint(1, 10),
-#         )
-#     )
+points = []
+for i in range(len(coeffs) + 1):
+    points.append(
+        (
+            randint(1, 10),
+            randint(1, 10),
+            randint(1, 10),
+            randint(1, 10),
+        )
+    )
 
 
 # points.append((1, 1, 1, 0))
@@ -86,7 +78,7 @@ for i, s in enumerate(syms):
     bs = []
     for j, p in enumerate(points):
         eq = exp.subs(dict(zip(syms, p)))
-        print(eq)
+        # print(eq)
         # print(f"a[{j}] = {{", end=" ")
         # for k in range(len(coeffs)):
         # v = [0] * len(coeffs)
@@ -98,7 +90,12 @@ for i, s in enumerate(syms):
         bs.append(b)
         eqs.append(eq - b)
     # print(*bs, sep=",")
-    sol = sp.solve(eqs, coeffs)
+    sol = sp.solve(
+        eqs,
+        coeffs,
+    )
+    print(sol)
+    # print(eqs, bs)
     # assigning coeffs back into exp gives the final value of symbol after function run
     print(s, "after function =", exp.subs(sol))
 
