@@ -45,7 +45,12 @@ std::ostream& operator<<(std::ostream& os, const Matrix& m) {
 	return os;
 }
 
-Matrix gaussian(Matrix A, Matrix b) {
+enum GaussianResult {
+	ONE_SOLUTION = 0,
+	MANY_SOLUTIONS,	// Tape Movement
+	NO_SOLUTION,	// Increment by product of constant and reference
+};
+std::pair<GaussianResult, Matrix> gaussian(Matrix A, Matrix b) {
 	assert(A.rows() == b.rows());
 
 	// S = # samples
@@ -56,7 +61,7 @@ Matrix gaussian(Matrix A, Matrix b) {
 	const auto N = A.cols();
 	const auto M = b.cols();
 	for (auto i = 0u; i < S && i < N; ++i) {
-		if (A[i][i] == 0) { return {0, 0}; }
+		if (A[i][i] == 0) { return {MANY_SOLUTIONS, {0, 0}}; }
 		auto t = A[i][i];
 		for (auto j = 0u; j < N; ++j) { A[i][j] /= t; }
 		for (auto j = 0u; j < M; ++j) { b[i][j] /= t; }
@@ -68,8 +73,8 @@ Matrix gaussian(Matrix A, Matrix b) {
 		}
 	}
 	for (auto i = N; i < S; ++i) {
-		if (!b.isRowZero(i)) { return {0, 0}; }
+		if (!b.isRowZero(i)) { return {NO_SOLUTION, {0, 0}}; }
 	}
 	b.resize(N, M);
-	return b;
+	return {ONE_SOLUTION, b};
 }

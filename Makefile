@@ -32,18 +32,7 @@ test_big: test
 
 bench: bfi bfc
 	@echo 'Compiler'
-	hyperfine --warmup 2 \
-		--parameter-list loop --no-simple-loop-optimize, \
-		--parameter-list scan --no-scan-optimize, \
-		--parameter-list input $$(ls -1 ./testing/benches/m*.b | tr '\n' ',' | rev | cut -c 2- | rev ) \
-		--setup './bfc {loop} {scan} {input}' \
-		'./a.out' \
-		--shell=none
-	
-	@echo 'Interpreter'
-	hyperfine --warmup 2 \
-		--parameter-list loop --no-simple-loop-optimize, \
-		--parameter-list scan --no-scan-optimize, \
-		--parameter-list input $$(ls -1 ./testing/benches/m*.b | tr '\n' ',' | rev | cut -c 2- | rev ) \
-		'./bfi {loop} {scan} {input}' \
-		--shell=none
+	for i in benches/*.b; do \
+		hyperfine --warmup 10 --parameter-list loop --no-second-level-loop-optimize, --prepare "./bfc {loop} $$i" './a.out' --command-name="$(basename $$i) {loop}" --export-markdown=- --time-unit=millisecond --shell=none; \
+	done
+

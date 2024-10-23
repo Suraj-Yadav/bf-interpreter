@@ -274,29 +274,33 @@ auto solve(
 	// std::vector<std::vector<int>> points = {
 	// };
 
-	for (auto i = 0; i < S; ++i) {
-		// Set Tape with random numbers
-		for (const auto& e : variables) {  //
-			tape[e] = d(gen);
+	GaussianResult res = MANY_SOLUTIONS;
+
+	while (res == MANY_SOLUTIONS) {
+		for (auto i = 0; i < S; ++i) {
+			// Set Tape with random numbers
+			for (const auto& e : variables) {  //
+				tape[e] = d(gen);
+			}
+
+			// for (int j = 0; const auto& e : variables) {  //
+			// 	tape[e] = points[i][j++];
+			// }
+
+			for (int j = 0; const auto& e : terms) {
+				A[i][j] = 1;
+				for (const auto& f : e) { A[i][j] *= tape[f]; }
+				j++;
+			}
+
+			if (!mockRunner(code, tape)) { return x; }
+			for (int j = 0; const auto& e : variables) {  //
+				b[i][j++] = tape[e];
+			}
 		}
 
-		// for (int j = 0; const auto& e : variables) {  //
-		// 	tape[e] = points[i][j++];
-		// }
-
-		for (int j = 0; const auto& e : terms) {
-			A[i][j] = 1;
-			for (const auto& f : e) { A[i][j] *= tape[f]; }
-			j++;
-		}
-
-		if (!mockRunner(code, tape)) { return x; }
-		for (int j = 0; const auto& e : variables) {  //
-			b[i][j++] = tape[e];
-		}
+		std::tie(res, x) = gaussian(A, b);
 	}
-
-	x = gaussian(A, b);
 	// debug("A = %", A);
 	// debug("b = %", b);
 	// debug("x = %", x);
