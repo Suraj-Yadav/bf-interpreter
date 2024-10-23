@@ -309,6 +309,7 @@ bool extractVariables(
 	std::span<Instruction> code, std::set<std::multiset<int>>& terms,
 	std::set<int>& variables) {
 	code = code.subspan(1, code.size() - 2);
+	if (code.empty()) { return false; }
 	int shift = 0;
 	for (auto& i : code) {
 		switch (i.code) {
@@ -350,6 +351,7 @@ bool extractVariables(
 				return false;
 		}
 	}
+	if (terms.empty()) { return false; }
 	variables.insert(0);
 	{
 		auto degree = terms.begin()->size();
