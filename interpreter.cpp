@@ -98,6 +98,8 @@ auto run(std::span<Instruction> code) {
 	std::vector<DATA_TYPE> tape(TAPE_LENGTH, 0);
 	int ptr = TAPE_LENGTH / 2;
 
+	std::map<int, DATA_TYPE> temp;
+
 	std::vector<int> count(code.size(), 0);
 	for (auto itr = code.begin(); itr != code.end(); itr++) {
 		const auto& inst = *itr;
@@ -112,8 +114,21 @@ auto run(std::span<Instruction> code) {
 				break;
 			}
 
+			case WRITE_LOCK:
+				temp[ptr + inst.lRef] = tape[ptr + inst.lRef];
+				break;
+
+			case WRITE_UNLOCK:
+				tape[ptr + inst.lRef] = temp[ptr + inst.lRef];
+				temp.erase(ptr + inst.lRef);
+				break;
+
 			case SET_C:
-				tape[ptr + inst.lRef] = inst.value;
+				if (temp.contains(ptr + inst.lRef)) {
+					temp[ptr + inst.lRef] = inst.value;
+				} else {
+					tape[ptr + inst.lRef] = inst.value;
+				}
 				break;
 
 			case WRITE:
@@ -135,7 +150,11 @@ auto run(std::span<Instruction> code) {
 			case INCR: {
 				DATA_TYPE t = inst.value;
 				for (const auto& r : inst.rRef) { t *= tape[ptr + r]; }
-				tape[ptr + inst.lRef] += t;
+				if (temp.contains(ptr + inst.lRef)) {
+					temp[ptr + inst.lRef] += t;
+				} else {
+					tape[ptr + inst.lRef] += t;
+				}
 				break;
 			}
 

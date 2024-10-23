@@ -24,9 +24,11 @@ enum Inst_Codes {
 	SET_C,	 // Set to constant
 	WRITE,
 	READ,
-	JUMP_C,	 // Jump to closing bracket
-	JUMP_O,	 // Jump to opening bracket
-	SCAN,	 // Scan for 0
+	JUMP_C,		   // Jump to closing bracket
+	JUMP_O,		   // Jump to opening bracket
+	SCAN,		   // Scan for 0
+	WRITE_LOCK,	   // stop writes to cell, storing writes in a temp cell
+	WRITE_UNLOCK,  // set value from temp cell and enable writes to cell
 	DEBUG,
 	HALT,
 };
@@ -88,9 +90,12 @@ std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 			return os << "JUMP(" << a.value << ")";
 		case NO_OP:
 			return os << "NO_OP";
-			break;
 		case TAPE_M:
 			return os << "MOV(" << a.value << ")";
+		case WRITE_LOCK:
+			return os << "W_LOCK(" << a.lRef << ")";
+		case WRITE_UNLOCK:
+			return os << "W_UNLOCK(" << a.lRef << ")";
 			break;
 	}
 	return os;
@@ -141,6 +146,8 @@ CodeInfo codeInfo(std::span<Instruction> code) {
 				info.hasJumps = true;
 				break;
 			case NO_OP:
+			case WRITE_LOCK:
+			case WRITE_UNLOCK:
 				break;
 		}
 	}
@@ -176,9 +183,10 @@ bool isScanLoop(const CodeInfo& info) {
 		   info.parent.empty();
 }
 
-bool mockRunner(std::span<Instruction> code, std::map<int, int>& tape) {
+bool mockRunner(std::span<Instruction> code, std::map<int, mpz_class>& tape) {
 	int ptr = 0;
 	int count = 0;
+	std::map<int, mpz_class> tempTape;
 	constexpr auto LOOP_LIMIT = 512;
 	for (auto itr = code.begin(); itr != code.end(); itr++) {
 		if (count >= LOOP_LIMIT) { return false; }
@@ -188,8 +196,20 @@ bool mockRunner(std::span<Instruction> code, std::map<int, int>& tape) {
 				ptr += i.value;
 				break;
 
+			case WRITE_LOCK:
+				tempTape[ptr + i.lRef] = tape[ptr + i.lRef];
+				break;
+			case WRITE_UNLOCK:
+				tape[ptr + i.lRef] = tempTape[ptr + i.lRef];
+				tempTape.erase(ptr + i.lRef);
+				break;
+
 			case SET_C:
-				tape[ptr + i.lRef] = i.value;
+				if (tempTape.contains(ptr + i.lRef)) {
+					tempTape[ptr + i.lRef] = i.value;
+				} else {
+					tape[ptr + i.lRef] = i.value;
+				}
 				break;
 
 			case JUMP_C:
@@ -204,9 +224,13 @@ bool mockRunner(std::span<Instruction> code, std::map<int, int>& tape) {
 				break;
 
 			case INCR: {
-				int t = i.value;
+				mpz_class t = i.value;
 				for (const auto& r : i.rRef) { t *= tape[ptr + r]; }
-				tape[ptr + i.lRef] += t;
+				if (tempTape.contains(ptr + i.lRef)) {
+					tempTape[ptr + i.lRef] += t;
+				} else {
+					tape[ptr + i.lRef] += t;
+				}
 				break;
 			}
 
@@ -223,12 +247,12 @@ bool mockRunner(std::span<Instruction> code, std::map<int, int>& tape) {
 	return true;
 }
 
+constexpr auto VARIABLE_LIMIT = 20u;
+
 auto solve(
 	std::span<Instruction> code, const std::set<std::multiset<int>>& terms,
 	const std::set<int>& variables) {
 	Matrix x(0, 0);
-
-	constexpr auto VARIABLE_LIMIT = 20;
 
 	if (terms.size() > VARIABLE_LIMIT || terms.size() <= 0) { return x; }
 	const int N = static_cast<int>(terms.size()),
@@ -245,11 +269,11 @@ auto solve(
 	std::mt19937 gen(rd());
 	std::uniform_int_distribution<> d(1, N * N);
 
-	std::map<int, int> tape;
+	std::map<int, mpz_class> tape;
 
 	// std::vector<std::vector<int>> points = {
 	// };
-	
+
 	for (auto i = 0; i < S; ++i) {
 		// Set Tape with random numbers
 		for (const auto& e : variables) {  //
@@ -259,7 +283,7 @@ auto solve(
 		// for (int j = 0; const auto& e : variables) {  //
 		// 	tape[e] = points[i][j++];
 		// }
-		
+
 		for (int j = 0; const auto& e : terms) {
 			A[i][j] = 1;
 			for (const auto& f : e) { A[i][j] *= tape[f]; }
@@ -279,47 +303,6 @@ auto solve(
 
 	// its easier to process transposed x
 	return x.T();
-}
-
-std::vector<int> order(
-	const std::vector<std::map<std::multiset<int>, mpq_class>>& expressions,
-	const std::set<int>& variables) {
-	std::vector<std::set<int>> incoming(variables.size());
-	std::vector<std::set<int>> outgoing(variables.size());
-	std::vector<int> topo;
-	std::set<int> S;
-	std::map<int, int> ind;
-
-	for (int i = 0; const auto& v : variables) { ind[v] = i++; }
-
-	for (const auto& v : variables) {
-		auto i = ind[v];
-		for (const auto& term : expressions[i]) {
-			for (const auto& f : term.first) {
-				if (f != v) {
-					incoming[i].insert(ind[f]);
-					outgoing[ind[f]].insert(i);
-				}
-			}
-		}
-		if (incoming[i].empty()) { S.insert(i); }
-	}
-
-	while (!S.empty()) {
-		auto u = *S.begin();
-		S.erase(S.begin());
-		topo.push_back(u);
-		for (const auto& v : outgoing[u]) {
-			incoming[v].erase(u);
-			if (incoming[v].empty()) { S.insert(v); }
-		}
-	}
-
-	for (auto& e : incoming) {
-		if (!e.empty()) { return {}; }
-	}
-	std::reverse(topo.begin(), topo.end());
-	return topo;
 }
 
 bool extractVariables(
@@ -353,7 +336,10 @@ bool extractVariables(
 				variables.insert(i.lRef + shift);
 				break;
 			}
+			case WRITE_LOCK:
+			case WRITE_UNLOCK:
 			case NO_OP:
+				break;
 			case WRITE:
 			case READ:
 			case JUMP_C:
@@ -365,6 +351,15 @@ bool extractVariables(
 		}
 	}
 	variables.insert(0);
+	{
+		auto degree = terms.begin()->size();
+		for (const auto& e : terms) { degree = std::max(degree, e.size()); }
+		std::multiset<int> term;
+		for (auto i = 0u; i < degree; ++i) {
+			term.insert(0);
+			terms.insert(term);
+		}
+	}
 	return shift == 0;
 }
 
@@ -440,23 +435,17 @@ bool linearTest(
 		}
 	}
 
-	auto expressions = computeExpressions(x, terms, variables);
-
-	// Simply generating instructs from expressions is not
-	// enough they need to be generated in proper order as
-	// changes are made in place
-	auto ord = order(expressions, variables);
-	// No order is possible
-	if (ord.size() == 0) { return false; }
-
-	std::vector<int> vars(variables.begin(), variables.end());
 	newCode.push_back({JUMP_C, 0, 0, {}});
 
+	for (const auto& v : variables) {
+		newCode.push_back({WRITE_LOCK, v, 0, {}});
+	}
+
+	auto expressions = computeExpressions(x, terms, variables);
 	bool canSkipCheck = true;
 
-	for (auto& i : ord) {
-		auto& v = vars[i];
-		auto& expr = expressions[i];
+	for (auto i = 0u; const auto& v : variables) {
+		auto& expr = expressions[i++];
 		if (expr.size() == 1 && expr.contains({v}) && expr[{v}] == -1) {
 			canSkipCheck = canSkipCheck && v == 0;
 			Instruction inst;
@@ -466,7 +455,7 @@ bool linearTest(
 			newCode.push_back(inst);
 			continue;
 		}
-		for (auto& [term, coeff] : expressions[i]) {
+		for (auto& [term, coeff] : expr) {
 			canSkipCheck = canSkipCheck && term.contains(0);
 			Instruction inst;
 			inst.code = INCR;
@@ -477,10 +466,14 @@ bool linearTest(
 		}
 	}
 
+	for (const auto& v : variables) {
+		newCode.push_back({WRITE_UNLOCK, v, 0, {}});
+	}
+
 	if (canSkipCheck) {
 		newCode.erase(newCode.begin());
 	} else {
-		newCode.front().value = newCode.size();
+		newCode.front().value = static_cast<int>(newCode.size());
 		newCode.push_back({JUMP_O, -1, -newCode.front().value, {}});
 	}
 

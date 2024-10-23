@@ -54,13 +54,13 @@ def f(v0, vn8, vn7, vn9):
 
 # what we want to solve for
 def function(w, x, y, z):
-    return f(w, x, y, z)
+    return test(w, x, y, z)
 
 
 v = (1 + x + x * x) * (1 + y + y * y) * (1 + z + z * z) * (1 + w + w * w)
 # Limit v to terms which are at max degree of 2
 v = v.expand().as_terms()
-v = [1, w, w * w, x, y, z, w * x, w * y, w * z]
+v = [ e[0] for e in  v[0] if sum(e[1][1]) <= 2 ]
 
 # Generate coeff for each term
 coeffs = [sp.symbols(f"c{i}") for i in range(len(v))]
