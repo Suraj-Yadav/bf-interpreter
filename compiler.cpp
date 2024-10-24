@@ -88,6 +88,40 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 	}
 }
 
+void compileIncr(
+	std::ofstream& output, const std::string& dest, const Instruction& inst) {
+	if (inst.rRef.empty()) {
+		print(output, "	mov eax, %", mod(inst.value));
+		print(output, "	add BYTE PTR %, al", dest);
+		return;
+	}
+	auto i = 0u;
+	if (inst.value == 1 || inst.value == -1) {
+		print(output, "	movzx eax, BYTE PTR tape[rbx+%]", inst.rRef[i++]);
+	} else {
+		print(output, "	mov eax, %", inst.value);
+	}
+	for (; i < inst.rRef.size(); ++i) {
+		print(output, "	movzx ecx, BYTE PTR tape[rbx+%]", inst.rRef[i]);
+		print(output, "	imul eax, ecx");
+	}
+	if (inst.value == -1) {
+		print(output, "	sub BYTE PTR %, al", dest);
+	} else {
+		print(output, "	add BYTE PTR %, al", dest);
+	}
+}
+
+void globalArray(
+	std::ofstream& output, std::string_view name, const auto size = 0u) {
+	print(output, "	.globl %", name);
+	print(output, "	.align 32");
+	print(output, "	.align 32");
+	print(output, "	.size %, %", name, size);
+	print(output, "%:", name);
+	print(output, "	.zero %", size);
+}
+
 bool compile(std::span<Instruction> code, const std::filesystem::path& path) {
 	std::ofstream output(path);
 	output << R"(
@@ -104,36 +138,27 @@ main:
 	// I store the current index of tape in register B
 	print(output, "	mov rbx, %", TAPE_LENGTH / 2);
 
+	std::map<int, int> locks;
+	std::vector<int> tempSlots(VARIABLE_LIMIT, 0);
+	std::iota(tempSlots.begin(), tempSlots.end(), 0);
+
 	auto loc = 0u;
-	for (auto& i : code) {
-		switch (i.code) {
+	for (auto& inst : code) {
+		auto dest = "tape[rbx+" + std::to_string(inst.lRef) + "]";
+		if (locks.contains(inst.lRef)) {
+			dest = "temp[" + std::to_string(locks[inst.lRef]) + "]";
+		}
+		switch (inst.code) {
 			case NO_OP:
 				break;
 			case TAPE_M:
-				print(output, "	add rbx, %", i.value);
+				print(output, "	add rbx, %", inst.value);
 				break;
 			case SET_C:
-				print(output, "	mov BYTE PTR tape[rbx], %", i.value);
+				print(output, "	mov BYTE PTR %, %", dest, inst.value);
 				break;
-			case INCR_C:
-				print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-				print(output, "	add ecx, %", mod(i.value));
-				print(output, "	mov BYTE PTR tape[rbx], cl");
-				break;
-			case INCR_R:
-				if (i.value == 1) {
-					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-					print(output, "	add BYTE PTR tape[rbx+%], cl", i.lRef);
-				} else if (i.value == -1) {
-					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-					print(output, "	sub BYTE PTR tape[rbx+%], cl", i.lRef);
-
-				} else {
-					print(output, "	movzx ecx, BYTE PTR tape[rbx]");
-					print(output, "	mov eax, %", i.value);
-					print(output, "	imul eax, ecx");
-					print(output, "	add BYTE PTR tape[rbx+%], al", i.lRef);
-				}
+			case INCR:
+				compileIncr(output, dest, inst);
 				break;
 			case WRITE:
 				print(output, "	mov rsi, QWORD PTR stdout");
@@ -147,19 +172,47 @@ main:
 				break;
 			case JUMP_C:
 				print(output, "	cmp BYTE PTR tape[rbx], 0");
-				print(output, "	je .LOC%", loc + i.value);
+				print(output, "	je .LOC%", loc + inst.value);
 				print(output, ".LOC%:", loc);
 				break;
 			case JUMP_O:
-				print(output, "	cmp BYTE PTR tape[rbx], 0");
-				print(output, "	jne .LOC%", loc + i.value);
+				if (inst.lRef == 0) {
+					print(output, "	cmp BYTE PTR tape[rbx], 0");
+					print(output, "	jne .LOC%", loc + inst.value);
+				}
 				print(output, ".LOC%:", loc);
 				break;
 			case SCAN:
-				scan(output, i, loc);
+				scan(output, inst, loc);
 				break;
 			case DEBUG:
 			case HALT:
+				break;
+			case WRITE_LOCK:
+				if (locks.contains(inst.lRef)) {
+					print(
+						std::cerr, "Inst: %: cell % is already locked", loc,
+						inst.lRef);
+					return false;
+				}
+				locks[inst.lRef] = tempSlots.back();
+				tempSlots.pop_back();
+				print(output, "	movzx eax, BYTE PTR tape[rbx+%]", inst.lRef);
+				print(output, "	mov BYTE PTR temp[%], al", locks[inst.lRef]);
+
+				break;
+			case WRITE_UNLOCK:
+				if (!locks.contains(inst.lRef)) {
+					print(
+						std::cerr, "Inst: %: cell % is not locked", loc,
+						inst.lRef);
+					return false;
+				}
+				print(output, "	movzx eax, BYTE PTR temp[%]", locks[inst.lRef]);
+				print(output, "	mov BYTE PTR tape[rbx+%], al", inst.lRef);
+
+				tempSlots.push_back(locks[inst.lRef]);
+				locks.erase(inst.lRef);
 				break;
 		}
 		loc++;
@@ -171,14 +224,9 @@ main:
 	ret
 	.size	main, .-main
 .bss
-	.globl tape
-	.align 32
-	.type tape, @object
-	.size tape, )"
-		   << TAPE_LENGTH << R"(
-tape:
-	.zero )"
-		   << TAPE_LENGTH << "\n";
+)";
+	globalArray(output, "tape", TAPE_LENGTH);
+	globalArray(output, "temp", VARIABLE_LIMIT);
 
 	return true;
 }
@@ -200,6 +248,7 @@ int main(int argc, char* argv[]) {
 
 	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
 	if (args.optimizeScans) { p.optimizeScans(); }
+	if (args.linearizeLoops) { p.linearizeLoops(); }
 
 	auto outputPath =
 		std::filesystem::temp_directory_path() / "tmp-bf-assembly.s";

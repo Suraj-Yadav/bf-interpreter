@@ -1,18 +1,18 @@
 
-CXXFLAGS := -Wall -Wextra -Wpedantic -std=c++20 -mavx512bw
+CXXFLAGS := -Wall -Wextra -Wpedantic -std=c++20 -mavx512bw -lgmpxx -lgmp
 
 build: bfi bfc bfi_g vec
 
-bfi: interpreter.cpp parser.hpp
+bfi: interpreter.cpp parser.hpp math.hpp util.hpp
 	g++ -Ofast $(CXXFLAGS) interpreter.cpp -o ./bfi
 
-bfi_g: interpreter.cpp parser.hpp
+bfi_g: interpreter.cpp parser.hpp math.hpp util.hpp
 	g++ -g $(CXXFLAGS) interpreter.cpp -o ./bfi_g
 
-bfc: compiler.cpp parser.hpp
+bfc: compiler.cpp parser.hpp math.hpp util.hpp
 	g++ -g $(CXXFLAGS) compiler.cpp -o ./bfc
 
-vec: vec_test.cpp 
+vec: vec_test.cpp util.hpp
 	g++ -O3 $(CXXFLAGS) vec_test.cpp -o vec
 	g++ -g  $(CXXFLAGS) vec_test.cpp -o vec_g
 
@@ -32,18 +32,8 @@ test_big: test
 
 bench: bfi bfc
 	@echo 'Compiler'
-	hyperfine --warmup 2 \
-		--parameter-list loop --no-simple-loop-optimize, \
-		--parameter-list scan --no-scan-optimize, \
-		--parameter-list input $$(ls -1 ./testing/benches/m*.b | tr '\n' ',' | rev | cut -c 2- | rev ) \
-		--setup './bfc {loop} {scan} {input}' \
-		'./a.out' \
-		--shell=none
-	
-	@echo 'Interpreter'
-	hyperfine --warmup 2 \
-		--parameter-list loop --no-simple-loop-optimize, \
-		--parameter-list scan --no-scan-optimize, \
-		--parameter-list input $$(ls -1 ./testing/benches/m*.b | tr '\n' ',' | rev | cut -c 2- | rev ) \
-		'./bfi {loop} {scan} {input}' \
-		--shell=none
+	for i in benches/*.b; do \
+		./bfc $$i; \
+		hyperfine --warmup 10 --parameter-list loop --no-linearize-loop-optimize, --prepare "./bfc {loop} $$i" './a.out' --command-name="$(basename $$i) {loop}" --export-markdown=- --time-unit=millisecond --shell=none; \
+	done
+
