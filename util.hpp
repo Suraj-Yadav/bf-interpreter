@@ -31,7 +31,7 @@ struct Args {
 	bool profile = false;
 	bool optimizeSimpleLoops = true;
 	bool optimizeScans = true;
-	bool optimizeSecondLevelLoops = true;
+	bool linearizeLoops = true;
 };
 
 Args argparse(int argc, char* argv[]) {
@@ -47,8 +47,8 @@ Args argparse(int argc, char* argv[]) {
 			a.optimizeSimpleLoops = false;
 		} else if (arg == "--no-scan-optimize") {
 			a.optimizeScans = false;
-		} else if (arg == "--no-second-level-loop-optimize") {
-			a.optimizeSecondLevelLoops = false;
+		} else if (arg == "--no-linearize-loop-optimize") {
+			a.linearizeLoops = false;
 		} else if (a.input.empty()) {
 			a.input = arg;
 		}

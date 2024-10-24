@@ -33,6 +33,7 @@ test_big: test
 bench: bfi bfc
 	@echo 'Compiler'
 	for i in benches/*.b; do \
-		hyperfine --warmup 10 --parameter-list loop --no-second-level-loop-optimize, --prepare "./bfc {loop} $$i" './a.out' --command-name="$(basename $$i) {loop}" --export-markdown=- --time-unit=millisecond --shell=none; \
+		./bfc $$i; \
+		hyperfine --warmup 10 --parameter-list loop --no-linearize-loop-optimize, --prepare "./bfc {loop} $$i" './a.out' --command-name="$(basename $$i) {loop}" --export-markdown=- --time-unit=millisecond --shell=none; \
 	done
 

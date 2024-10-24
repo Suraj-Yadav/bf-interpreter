@@ -12,391 +12,87 @@
 
 \setlength{\parindent}{0cm}
 
-\title{Assignment 8 Loop Optimisations}
+\title{Assignment 9 More Loop Optimisations: Option 2}
 \author{Suraj Yadav (u1472115)}
 
 \begin{document}
 \maketitle
 \section{Link}
 \url{https://github.com/Suraj-Yadav/bf-interpreter}
-\section{Optimizing Simple Loops}
-My current implementation only optimizes innermost simple loops.
-
-The optimizer initializes a new tape $t'$ and executes the body of the loop. For eg. if the loop was \texttt{[->+>---<<]}, instructions \texttt{->+>---<<} gets executed.
-
-At this movement let $t'[i]$ be the cell $i^{th}$ place w.r.t. to loop counter, with $t'[0]$ being the loop counter. As this is a simple loop, $t'[0] = \pm1$. Iterating through the $t'$, we find all the cells whose values are not zero. The implementation uses a hash set as a tape so we just need to iterate through the elements.
-
-Let $k = 1$ if $t'[0] = -1$ and $k = -1$ if $t'[0] = 1$.
-
-At this point the optimizer generates these new instructions in order and replaces the loop with these.
-\begin{enumerate}
-	\item $\forall t'[i]\ne0 \textbf{ AND } i\ne0, t[i] \gets t[i] + k \cdot t'[0] \cdot t'[i]$
-	\item $t[0] \gets 0$
-\end{enumerate}
-Here $t[i]$ represents the cell on the actual tape.
-
-The order is important because all the cells other than loop counter have to be updated before it is set to 0.
-
-\subsection{Values for $k$}
-\begin{enumerate}
-	\item $t'[0] = -1$: When $t'[0] = -1$, the loop iterates $t'[0]$ times. Thus all the other cell will be changed by ($change$ in one iteration)$ \cdot t'[0]$, which is $t'[i] \cdot t'[0]$. Thus $k = 1$.
-	\item $t'[0] = +1$: When $t'[0] = 1$, the loop iterates $256 - t'[0] \mod 256$ times. Thus all the other cell will be changed by ($change$ in one iteration)$ \cdot (256 - t'[0]) \mod 256$. Which on simplification becomes
-	      \begin{align*}
-		      \implies & t'[i] \cdot (256 - t'[0])\mod 256                   \\
-		      \implies & 256 \cdot t'[i]\mod 256 - t'[i] \cdot t'[0]\mod 256 \\
-		      \implies & -1 \cdot t'[i] \cdot t'[0]\mod 256
-	      \end{align*}
-	      As we are using \texttt{\textbf{unsigned char}}, $\mod 256$ is automatically applied in all operations. Thus $k = -1$.
-\end{enumerate}
-
-\subsection{Positive Example}
-\texttt{[+>+>---<<]} is converted into
-	{\renewcommand\fcolorbox[4][]{\textcolor{cyan}{\strut#4}}
-		\begin{minted}{asm}
-# rbx stores the current tape position
-# t[1] += -1 * t[0], the multiplication step is eliminated
-movzx ecx, BYTE PTR tape[rbx]
-sub BYTE PTR tape[rbx+1], cl
-# t[2] += 3 * t[0]
-movzx ecx, BYTE PTR tape[rbx]
-mov eax, 3
-imul eax, ecx
-add BYTE PTR tape[rbx+2], al
-# t[0] = 0
-mov BYTE PTR tape[rbx], 0
-\end{minted}
-	}
-
-\subsection{Negative Example}
-I was not able to optimize away newer simple loops.
-For eg. \texttt{++++[->++++[->+++++<]<]>>.}
-This is equivalent to
-\begin{minted}{cpp}
-tape[0]+=4
-while(tape[0]!=0) {
-	tape[0]--;
-	tape[1] += 4;
-	while(tape[1]!=0) {
-		tape[1]--;
-		tape[2] += 5;
-	}
-}
-print(tape[2]);
-\end{minted}
-I am able to optimize this to
-\begin{minted}{cpp}
-tape[0]+=4
-while(tape[0]!=0) {
-	tape[0]--;
-	tape[1] += 4;
-	tape[2] += tape[1] * 5;
-	tape[1] = 0;
-}
-print(tape[2]);
-\end{minted}
-This is a simple loop, but I can't figure out how to optimize this further.
-
-\pagebreak
-\section{Optimizing Memory Scans}
-Let me call the net change inside the loop as \textbf{jump}.
-
-My implementation is for \textbf{AVX512} and is based on the \textbf{\texttt{vpcmpb}} instruction. I use 512 bits registers which allow us to compare 64 cells at once. The idea is general for any number of bits, but \textbf{AVX512} is needed because the instruction is only available there.
-
-This idea is only used when $\mid$jump$\mid$ $< 16$, I found that for $\mid$jump$\mid$ $\ge16$, vector scan gives no advantage.
-
-\bigskip
-\texttt{VPCMPUB k0 \{k1\}, zmm2, zmm3/m512, imm8}: Compare packed unsigned byte values in zmm3/m512 and zmm2 using bits 2:0 of imm8 as a comparison predicate with writemask k1 and leave the result in mask register k0.
-
-
-For equality, \texttt{imm8} = 0, so the actual instruction is \texttt{VPCMPUB k0 \{k1\}, zmm2, zmm3/m512, 0}.
-
-\bigskip
-Thus based on the the value of jump, we can create a suitable value of \texttt{k1}. Starting from the least significant bit, set every jump\textsuperscript{th} bit as 1. Note: all bits shown have LSB on the left.
-\begin{itemize}
-	\item jump = 1: \texttt{k1 = 1111111111111111111111111111111111111111111111111111111111111111}
-	\item jump = 2: \texttt{k1 = 1010101010101010101010101010101010101010101010101010101010101010}
-	\item jump = 8: \texttt{k1 = 1000000010000000100000001000000010000000100000001000000010000000}
-\end{itemize}
-
-\bigskip
-After the comparison, if \texttt{k0 = 0}, then none of the 64 cells were 0 and we move to the next 64 values. If \texttt{k0 $\ne$ 0}, we need to find the least significant set bit of k0. This is easily done by \texttt{builtin\_ctz} ( or \texttt{std::countr\_zero} since C++20).
-
-Assuming jump is positive, the algorithm in general is,
-\begin{minted}{cpp}
-zmm0 = 0;
-i = 0;
-k1 = generateMask(jump);
-while(true) {
-    zmm1 = Load 64 cells starting from i;
-    // _mm512_mask_cmpeq_epi8_mask is the intrinsic for vpcmpb equality
-    k0 = _mm512_mask_cmpeq_epi8_mask(k1, zmm0, zmm1); 
-    if (k != 0) {
-        return std::countr_zero(k0) + i;
-    }
-    k1 = updateMask(jump, k1);
-    i += 64;
-}
-\end{minted}
-
-How k1 changes every iteration is depended on the the value of jump and this is handled on a case by case basis
-
-\subsection{When jump is positive and power of 2}
-Consider all the elements which need to be compared for scan when jump = 4, here 1 represents that ith cell needs to be considered.
-
-\texttt{1000100010001000100010001000100010001000100010001000100010001000100010001000...}
-
-\bigskip
-If we split this in groups of 64 we get,
-
-\texttt{1000100010001000100010001000100010001000100010001000100010001000}
-
-\texttt{1000100010001000100010001000100010001000100010001000100010001000}
-
-\texttt{1000100010001000100010001000100010001000100010001000100010001000}
-
-\texttt{...}
-
-We can see for 4, \texttt{k1} never changes.
-
-This is true in general for any power of 2, because initially \texttt{k1} is repeating pattern of jump bits and jump is a factor of 64.
-
-So we don't need to recompute $k1$ every iteration. In assembly our algorithm becomes
-
-	{\renewcommand\fcolorbox[4][]{\textcolor{cyan}{\strut#4}}
-		\begin{minted}{asm}
-# rbx stores the current tape position
-# Scan of 4
-    vpxorq zmm0, zmm0, zmm0         # set zmm0 to 0
-    mov rax, 1229782938247303441    # 
-    kmovq k1, rax                   # set k1 to appropriate mask for 4
-    add rbx, -64                    # jump back 64 cells
-.SCAN_START:
-    add rbx, 64                           # jump forward 64 cells
-    vmovdqu64 zmm1, ZMMWORD PTR tape[rbx] # set zmm1 to values of 64 cells
-    vpcmpb k0 {k1}, zmm0, zmm1, 0         # compare all cells using mask
-    kortestq k0, k0
-    je .SCAN_START                        # if k0 is 0, loop back
-    kmovq   rax, k0                       # can't do ops on k0, so need it in normal reg
-    rep bsf rdx, rax                      # bit scan forward and store it in rdx 
-    add rbx, rdx                          # mov rbx to required cell
-\end{minted}
-	}
-
-
-\subsection{When jump is positive and not a power of 2}
-Consider jump = 5, the search pattern is
-
-\texttt{1000010000100001000010000100001000010000100001000010000100001000010000100001...}
-
-\bigskip
-Splitting into groups of 64 we get,
-
-\texttt{1000010000100001000010000100001000010000100001000010000100001000}
-
-\texttt{0100001000010000100001000010000100001000010000100001000010000100}
-
-\texttt{0010000100001000010000100001000010000100001000010000100001000010}
-
-\texttt{0001000010000100001000010000100001000010000100001000010000100001}
-
-\texttt{0000100001000010000100001000010000100001000010000100001000010000}
-
-\texttt{1000010000100001000010000100001000010000100001000010000100001000}
-
-
-\bigskip
-Straightaway the shift of 1 is seen, this 1 comes from the last 1 bit which couldn't fit in the current group and had to be moved to the next group. But shifting is not enough, at some point we need to set an appropriate bit on the left to maintain the repeating pattern.
-
-\bigskip
-After a lot of trial and error I found the update expression to be
-\begin{minted}{cpp}
-shift = jump - 64 % jump;           // count the remaining bits
-k1 = (k1 << shift) | (k1 >> (jump - shift));
-\end{minted}
-
-The is exactly the expression we would use to rotate bits. I think it works because we are rotating a repeating pattern of jump bits which makes it equal to rotating just jump bits. I arrived at this reasoning quite late, before this I had simply accepted that it somehow works.
-
-Thus the generated assembly is
-	{\renewcommand\fcolorbox[4][]{\textcolor{cyan}{\strut#4}}
-		\begin{minted}{asm}
-# rbx stores the current tape position
-#Scan of 5
-	vpxorq zmm0, zmm0, zmm0         # set zmm0 to 0
-	mov rax, 1190112520884487201    # 
-	kmovq k1, rax                   # set k1 to appropriate mask for 5
-	add rbx, -64                    # jump back 64 cells
-.SCAN_START:
-	add rbx, 64                             # jump forward 64 cells
-	vmovdqu64 zmm1, ZMMWORD PTR tape[rbx]   # set zmm1 to values of 64 cells
-	vpcmpb k0 {k1}, zmm0, zmm1, 0           # compare all cells using mask
-	mov rdx, rax                            
-	shl rdx, 1                              # left shift
-	shr rax, 4                              # right shift
-	or rax, rdx                             # or
-	kmovq k1, rax                           # update mask
-	kortestq k0, k0
-	je .SCAN_START                          # if k0 is 0, loop back
-	kmovq   rax, k0                         
-	rep bsf rdx, rax                        # bit scan forward and store it in rdx 
-	add rbx, rdx                            # mov rbx to required cell
-
-\end{minted}
-	}
-\pagebreak
-\subsection{When jump is negative and $\mid$jump$\mid$ is a power of 2}
-I only need to reverse all bit operations, that means reversing the mask \texttt{k1} and using \texttt{builtin\_clz} ( or \texttt{std::countl\_zero}). The generated assembly is
-	{\renewcommand\fcolorbox[4][]{\textcolor{cyan}{\strut#4}}
-		\begin{minted}{asm}
-#Scan of -4
-	add rbx, -63                    // need to shift left 63 cell first
-	mov rax, 9838263505978427528
-	kmovq k1, rax
-	vpxorq zmm0, zmm0, zmm0
-	add rbx, 64
-.SCAN_START:
-	add rbx, -64
-	vmovdqu64 zmm1, ZMMWORD PTR tape[rbx]
-	vpcmpb k0 {k1}, zmm0, zmm1, 0
-	kortestq k0, k0
-	je .SCAN_START
-	kmovq   rax, k0
-	rep bsr rdx, rax                // we use bit scan reverse now
-	add rbx, 63                     // shift 63 cells front again
-	sub rbx, rdx
-\end{minted}
-	}
-
-Originally, I was reversing the values in \texttt{zmm1} after load and keeping everything else same. But that resulted in more instructions than this approach.
-
-\pagebreak
-\subsection{When jump is negative and $\mid$jump$\mid$ is not a power of 2}
-Additionally I need to change the update operations for \texttt{k1}, which becomes
-\begin{minted}{cpp}
-shift = jump - 64 % jump;           // count the remaining bits
-k1 = (k1 >> shift) | (k1 << (jump - shift));
-\end{minted}
-The generated assembly is
-	{\renewcommand\fcolorbox[4][]{\textcolor{cyan}{\strut#4}}
-		\begin{minted}{asm}
-#Scan of -5
-	add rbx, -63
-	mov rax, 9520900167075897608
-	kmovq k1, rax
-	vpxorq zmm0, zmm0, zmm0
-	add rbx, 64
-.SCAN_START0:
-	add rbx, -64
-	vmovdqu64 zmm1, ZMMWORD PTR tape[rbx]
-	vpcmpb k0 {k1}, zmm0, zmm1, 0
-	mov rdx, rax
-	shr rdx, 1
-	shl rax, 4
-	or rax, rdx
-	kmovq k1, rax
-	kortestq k0, k0
-	je .SCAN_START0
-	kmovq   rax, k0
-	rep bsr rdx, rax
-	add rbx, 63
-	sub rbx, rdx
-\end{minted}
-	}
-
-\subsection{Negative Examples}
-All possible cases of jump are handled so nothing left to optimize.
-
-\pagebreak
 \section{Benchmarks}
+The number next to filename with no flags indicate the number of times the optimization fired.
 \begin{table}[H]
 	\raggedright
-	\begin{tabular}{|l|l|l|}
+	\begin{tabular}{|l|l|l|l|l|}
 		\hline
-		\textbf{Flags}                                              & \textbf{Mean [ms]} & \textbf{Relative} \\ \hline
+		\textbf{Flags}                                       & \textbf{Mean [ms]} & \textbf{Min [ms]} & \textbf{Max [ms]} & \textbf{Relative} \\ \hline
+		\texttt{bench.b --no-linearize-loop-optimize}        & 3.5 ± 0.7          & 2.0               & 4.8               & 1.34 ± 0.32       \\ \hline
+		\texttt{bench.b} (1)                                 & 2.6 ± 0.4          & 1.6               & 3.3               & 1.00              \\ \hline
 		\hline
-		bench.b --no-simple-loop-optimize --no-scan-optimize        & 297.5 ± 107.4      & 117.62 ± 47.69    \\ \hline
-		bench.b --no-scan-optimize                                  & 2.5 ± 0.5          & 1.00 ± 0.26       \\ \hline
-		bench.b --no-simple-loop-optimize                           & 222.6 ± 6.6        & 88.01 ± 16.48     \\ \hline
-		bench.b                                                     & 2.5 ± 0.5          & 1.00              \\ \hline
+		\texttt{bottles.b --no-linearize-loop-optimize}      & 2.6 ± 0.5          & 1.5               & 3.8               & 1.24 ± 0.39       \\ \hline
+		\texttt{bottles.b} (6)                               & 2.1 ± 0.5          & 1.2               & 3.1               & 1.00              \\ \hline
 		\hline
-		bottles.b --no-simple-loop-optimize --no-scan-optimize      & 2.0 ± 0.4          & 1.23 ± 0.40       \\ \hline
-		bottles.b --no-scan-optimize                                & 1.6 ± 0.4          & 1.00              \\ \hline
-		bottles.b --no-simple-loop-optimize                         & 2.0 ± 0.4          & 1.23 ± 0.40       \\ \hline
-		bottles.b                                                   & 1.6 ± 0.4          & 1.00 ± 0.34       \\ \hline
+		\texttt{deadcodetest.b --no-linearize-loop-optimize} & 2.4 ± 0.6          & 1.2               & 3.5               & 1.00              \\ \hline
+		\texttt{deadcodetest.b} (0)                          & 2.4 ± 0.6          & 1.4               & 3.7               & 1.01 ± 0.34       \\ \hline
 		\hline
-		deadcodetest.b --no-simple-loop-optimize --no-scan-optimize & 1.3 ± 0.3          & 1.03 ± 0.39       \\ \hline
-		deadcodetest.b --no-scan-optimize                           & 1.3 ± 0.4          & 1.00              \\ \hline
-		deadcodetest.b --no-simple-loop-optimize                    & 1.3 ± 0.4          & 1.03 ± 0.41       \\ \hline
-		deadcodetest.b                                              & 1.5 ± 0.5          & 1.19 ± 0.48       \\ \hline
+		\texttt{hanoi.b --no-linearize-loop-optimize}        & 40.4 ± 0.9         & 38.2              & 41.7              & 10.86 ± 1.60      \\ \hline
+		\texttt{hanoi.b} (3)                                 & 3.7 ± 0.5          & 3.1               & 4.8               & 1.00              \\ \hline
 		\hline
-		hanoi.b --no-simple-loop-optimize --no-scan-optimize        & 3687.0 ± 89.1      & 98.52 ± 5.41      \\ \hline
-		hanoi.b --no-scan-optimize                                  & 40.3 ± 3.0         & 1.08 ± 0.10       \\ \hline
-		hanoi.b --no-simple-loop-optimize                           & 3514.7 ± 136.5     & 93.92 ± 5.89      \\ \hline
-		hanoi.b                                                     & 37.4 ± 1.8         & 1.00              \\ \hline
+		\texttt{hello.b --no-linearize-loop-optimize}        & 1.6 ± 0.3          & 1.1               & 2.4               & 1.00              \\ \hline
+		\texttt{hello.b} (0)                                 & 1.7 ± 0.4          & 1.0               & 3.1               & 1.06 ± 0.30       \\ \hline
 		\hline
-		hello.b --no-simple-loop-optimize --no-scan-optimize        & 1.4 ± 0.4          & 1.04 ± 0.42       \\ \hline
-		hello.b --no-scan-optimize                                  & 1.4 ± 0.4          & 1.04 ± 0.38       \\ \hline
-		hello.b --no-simple-loop-optimize                           & 1.4 ± 0.4          & 1.04 ± 0.39       \\ \hline
-		hello.b                                                     & 1.4 ± 0.3          & 1.00              \\ \hline
+		\texttt{long.b --no-linearize-loop-optimize}         & 150.5 ± 6.4        & 141.1             & 161.7             & 11.11 ± 1.00      \\ \hline
+		\texttt{long.b} (1)                                  & 13.5 ± 1.1         & 11.8              & 17.4              & 1.00              \\ \hline
 		\hline
-		long.b --no-simple-loop-optimize --no-scan-optimize         & 3043.6 ± 103.9     & 19.61 ± 1.05      \\ \hline
-		long.b --no-scan-optimize                                   & 155.2 ± 6.4        & 1.00              \\ \hline
-		long.b --no-simple-loop-optimize                            & 3052.6 ± 101.8     & 19.66 ± 1.04      \\ \hline
-		long.b                                                      & 161.6 ± 7.4        & 1.04 ± 0.06       \\ \hline
+		\texttt{loopremove.b --no-linearize-loop-optimize}   & 1.6 ± 0.3          & 1.1               & 2.7               & 1.03 ± 0.28       \\ \hline
+		\texttt{loopremove.b} (0)                            & 1.6 ± 0.3          & 1.1               & 2.3               & 1.00              \\ \hline
 		\hline
-		loopremove.b --no-simple-loop-optimize --no-scan-optimize   & 1.4 ± 0.4          & 1.10 ± 0.42       \\ \hline
-		loopremove.b --no-scan-optimize                             & 1.3 ± 0.3          & 1.00              \\ \hline
-		loopremove.b --no-simple-loop-optimize                      & 1.4 ± 0.4          & 1.08 ± 0.41       \\ \hline
-		loopremove.b                                                & 1.3 ± 0.3          & 1.07 ± 0.40       \\ \hline
+		\texttt{mandel.b --no-linearize-loop-optimize}       & 410.3 ± 6.9        & 398.6             & 420.2             & 1.00              \\ \hline
+		\texttt{mandel.b} (20)                               & 413.9 ± 25.2       & 388.6             & 455.6             & 1.01 ± 0.06       \\
 		\hline
-		mandel.b --no-simple-loop-optimize --no-scan-optimize       & 620.1 ± 29.0       & 1.59 ± 0.08       \\ \hline
-		mandel.b --no-scan-optimize                                 & 389.2 ± 7.7        & 1.00              \\ \hline
-		mandel.b --no-simple-loop-optimize                          & 599.7 ± 29.4       & 1.54 ± 0.08       \\ \hline
-		mandel.b                                                    & 412.6 ± 14.5       & 1.06 ± 0.04       \\ \hline
+		\texttt{serptri.b --no-linearize-loop-optimize}      & 1.7 ± 0.3          & 1.2               & 2.4               & 1.00 ± 0.26       \\ \hline
+		\texttt{serptri.b} (0)                               & 1.7 ± 0.3          & 1.1               & 2.5               & 1.00              \\ \hline
 		\hline
-		serptri.b --no-simple-loop-optimize --no-scan-optimize      & 1.5 ± 0.4          & 1.05 ± 0.38       \\ \hline
-		serptri.b --no-scan-optimize                                & 1.4 ± 0.4          & 1.00              \\ \hline
-		serptri.b --no-simple-loop-optimize                         & 1.4 ± 0.4          & 1.04 ± 0.39       \\ \hline
-		serptri.b                                                   & 1.4 ± 0.4          & 1.02 ± 0.37       \\ \hline
-		\hline
-		twinkle.b --no-simple-loop-optimize --no-scan-optimize      & 1.5 ± 0.4          & 1.12 ± 0.42       \\ \hline
-		twinkle.b --no-scan-optimize                                & 1.5 ± 0.4          & 1.10 ± 0.41       \\ \hline
-		twinkle.b --no-simple-loop-optimize                         & 1.4 ± 0.4          & 1.01 ± 0.37       \\ \hline
-		twinkle.b                                                   & 1.3 ± 0.4          & 1.00              \\ \hline
+		\texttt{twinkle.b --no-linearize-loop-optimize}      & 1.7 ± 0.3          & 1.1               & 2.4               & 1.00              \\ \hline
+		\texttt{twinkle.b} (0)                               & 1.7 ± 0.2          & 1.2               & 2.2               & 1.01 ± 0.22       \\ \hline
 	\end{tabular}
 \end{table}
 
-In most cases the speedup is due to simple loop optimization. This is expected as in most of these cases the required 0 cell is available nearby.
+The best cases are for hanoi and long showing $\sim10x$ speedup.
 
-In dbfi and cbfi the scan optimization is more apparent
-\begin{table}[H]
-	\centering
-	\begin{tabular}{|l|l|l|}
-		\hline
-		\textbf{Command}                                                           & \textbf{Mean [ms]} & \textbf{Relative} \\ \hline
-		twinkle on dbfi compiled with --no-simple-loop-optimize --no-scan-optimize & 1940.5 ± 5.3       & 15.35 ± 0.21      \\ \hline
-		twinkle on dbfi compiled with --no-scan-optimize                           & 1940.2 ± 5.9       & 15.35 ± 0.21      \\ \hline
-		twinkle on dbfi compiled with --no-simple-loop-optimize                    & 130.3 ± 2.1        & 1.03 ± 0.02       \\ \hline
-		twinkle on dbfi compiled with                                              & 126.4 ± 1.7        & 1.00              \\ \hline
-	\end{tabular}
-\end{table}
+Mandel has the most optimizations, but the time is approximately the same.
 
-\begin{table}[H]
-	\centering
-	\begin{tabular}{|l|l|l|}
-		\hline
-		\textbf{Command}                                                           & \textbf{Mean [ms]} & \textbf{Relative} \\ \hline
-		twinkle on cbfi compiled with --no-simple-loop-optimize --no-scan-optimize & 302.3 ± 9.5        & 11.63 ± 0.96      \\ \hline
-		twinkle on cbfi compiled with --no-scan-optimize                           & 295.1 ± 7.2        & 11.35 ± 0.91      \\ \hline
-		twinkle on cbfi compiled with --no-simple-loop-optimize                    & 41.7 ± 2.8         & 1.60 ± 0.16       \\ \hline
-		twinkle on cbfi compiled with                                              & 26.0 ± 2.0         & 1.00              \\ \hline
-	\end{tabular}
-\end{table}
+dbfi, cbfi and Sudoku didn't fire any of the optimization, so they can't be optimized by this.
 
-Finally these are the time for running mandel using dbfi and cbfi
-\begin{minted}{text}
-$ time ./cbfi < ./testing/benches/mandel.b
-./cbfi < ./testing/benches/mandel.b  3055.03s user 0.27s system 99% cpu 51:09.42 total	
-$ time ./dbfi < ./testing/benches/mandel.b
-./dbfi < ./testing/benches/mandel.b  8434.24s user 0.54s system 99% cpu 2:21:12.63 total
-\end{minted}
+\section{Implementation Details}
+\subsection{Solving Linear System}
+I implemented a very simple Matrix class whose cells are of type $\mathbb{Q}$ (Rational Number). For this I used \texttt{mpq\_class} from GMP (GNU Multiple Precision Arithmetic Library). \texttt{mpq\_class} stores a rational number as numerator and denominator using arbitrary precision integers. Keeping cells as \texttt{mpq\_class} side steps any floating point or overflow errors.
+
+The solver takes matrix $A$ and $b$ as input for the equation $Ax = b$ and solves them using Gaussian Elimination.
+
+\subsection{Linearizing Loop Body}
+After determining what all product terms (say $n$) need to be used for a loop body, I generate $n+1$ equations using random values for cells and pass them to the solver. If the solver returns \texttt{MANY\_SOLUTIONS}, I try again with a different random configuration. Finally I would either get \texttt{NO\_SOLUTION} or \texttt{ONE\_SOLUTION}.
+
+Since I use arbitrary precision fractions, it is possible that the solution involves fractions or integers outside (\texttt{INT\_MIN, INT\_MAX}). In both these cases, the loop is not linearized. I checked that none of the benchmark programs encountered this case, so I choose not to implement this.
+
+\subsection{Generating Instructions}
+My IR implements increment by separating increments as sum of products. So \texttt{z += 1+2*w+3*w*x} is represented as three separate instructions \texttt{z += 1; z += 2*w; z += 3*w*x}. This posed a bunch of problems when representing linearized loops.
+
+Let us assume this was the output of linearized loop
+
+\texttt{w = 0, x = x + w + z, y = x + y, z = 3*z + 2*w*z + 2*w*y}
+
+Problem 1: If changes for z are represented as \texttt{z += 2*z; z += 2*w*z; z += 2*w*y}, then the second statement will evaluate incorrect result as \texttt{z} would have changed. In this case all order will fail. I could have implemented an single increment instruction to represent a sum of products but that wouldn't solve problem 2.
+
+Problem 2: If changes for \texttt{w} are made first, all the all other expressions will evaluate incorrectly. An order of evaluation can be found but that only works if dependencies form a DAG, which is not the case in this example. What we need is a way to evaluate all RHS and then update LHS.
+
+To implement this I added two instructions to my IR.
+\begin{itemize}
+	\item \texttt{WRITE\_LOCK(i)}: Allocate a new variable (not on tape) and assign it the value of cell \texttt{i}. All further updates to cell \texttt{i} should be done on this new variable. Reads are still performed using value from cell \texttt{i}.
+	\item \texttt{WRITE\_UNLOCK(i)}: Set cell \texttt{i} = value of its corresponding new variable and deallocate the variable. All further updates to cell \texttt{i} should be done on cell \texttt{i}.
+\end{itemize}
+
+Both problems are solved by generating lock instructions before update instructions and unlock instructions after update instructions for all involved cells.
+
+
 \end{document}

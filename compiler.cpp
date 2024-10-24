@@ -248,7 +248,7 @@ int main(int argc, char* argv[]) {
 
 	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
 	if (args.optimizeScans) { p.optimizeScans(); }
-	if (args.optimizeSecondLevelLoops) { p.linearLoops(); }
+	if (args.linearizeLoops) { p.linearizeLoops(); }
 
 	auto outputPath =
 		std::filesystem::temp_directory_path() / "tmp-bf-assembly.s";

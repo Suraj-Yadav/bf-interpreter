@@ -733,7 +733,7 @@ class Program {
 		});
 	}
 
-	void linearLoops() {
+	void linearizeLoops() {
 		optimizeInnerLoops(__FUNCTION__, [&](auto&, auto code, auto& newCode) {
 			return linearTest(code, newCode);
 		});
