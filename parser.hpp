@@ -514,10 +514,14 @@ class Program {
 			srcToProgram.begin());
 	}
 
-	void parse(const std::string& file) {
-		std::ifstream input(file);
+	void parse(const Args& args) {
+		if (args.input.empty()) {
+			err = "fatal error: no input files";
+			return;
+		}
+		std::ifstream input(args.input);
 		if (!input.is_open()) {
-			err = "Cannot read file: '" + file + "'";
+			err = "cannot read file: '" + args.input.string() + "'";
 			return;
 		}
 		std::vector<int> stack;
@@ -608,8 +612,8 @@ class Program {
 		std::vector<Instruction> p, newCode;
 		std::vector<int> stack;
 
-		int count = 0;
 #ifdef LOG_INST
+		int count = 0;
 		std::ofstream before(std::string("/tmp/before-") + name + ".bfas");
 		std::ofstream after(std::string("/tmp/after-") + name + ".bfas");
 #endif
@@ -642,12 +646,11 @@ class Program {
 				print(after, "================%================", count);
 				for (auto& e : newCode) { print(after, "%", e); }
 				print(after, "================%================", count);
+				count++;
 #endif
 				p.erase(begin, end);
 				p.insert(p.end(), newCode.begin(), newCode.end());
 				newCode.clear();
-
-				count++;
 			}
 		}
 
@@ -659,16 +662,51 @@ class Program {
 		for (const auto& i : program) { optimized << i << "\n"; }
 #endif
 	}
+	void optimizeSimpleLoops() {
+		optimizeInnerLoops(__FUNCTION__, [](auto& info, auto, auto& newCode) {
+			if (!isSimpleLoop(info)) { return false; }
+			auto delta = info.delta;
+			int change = -delta[0];
+			delta.erase(0);
+			newCode.reserve(delta.size());
+			for (auto& e : delta) {
+				newCode.push_back({INCR, e.first, change * e.second, {0}});
+			}
+			newCode.push_back({SET_C, 0, 0, {}});
+			return true;
+		});
+	}
+
+	void optimizeScans() {
+		optimizeInnerLoops(__FUNCTION__, [](auto& info, auto, auto& newCode) {
+			if (!isScanLoop(info)) { return false; }
+			int scanJump = info.shift;
+			newCode.push_back({SCAN, 0, scanJump, {}});
+			return true;
+		});
+	}
+
+	void linearizeLoops() {
+		optimizeInnerLoops(__FUNCTION__, [&](auto&, auto code, auto& newCode) {
+			return linearTest(code, newCode);
+		});
+	}
 
    public:
-	Program(const std::string& file) {
-		parse(file);
+	[[nodiscard]] auto isOK() const { return !err.has_value(); }
+
+	Program(const Args& args) {
+		parse(args);
+		if (isOK()) {
+			if (args.optimizeSimpleLoops) { optimizeSimpleLoops(); }
+			if (args.optimizeScans) { optimizeScans(); }
+			if (args.linearizeLoops) { linearizeLoops(); }
+		}
 #ifdef LOG_INST
 		std::ofstream optimized("/tmp/actual.bfas");
 		for (const auto& i : program) { optimized << i << "\n"; }
 #endif
 	}
-	[[nodiscard]] auto isOK() const { return !err.has_value(); }
 	auto error() { return err.value(); }
 	auto& instructions() { return program; }
 
@@ -707,35 +745,5 @@ class Program {
 		printLoops("Simple Loops", simple);
 		printLoops("Scan Loops", scan);
 		printLoops("Non Simple Loops", notSimple);
-	}
-
-	void optimizeSimpleLoops() {
-		optimizeInnerLoops(__FUNCTION__, [](auto& info, auto, auto& newCode) {
-			if (!isSimpleLoop(info)) { return false; }
-			auto delta = info.delta;
-			int change = -delta[0];
-			delta.erase(0);
-			newCode.reserve(delta.size());
-			for (auto& e : delta) {
-				newCode.push_back({INCR, e.first, change * e.second, {0}});
-			}
-			newCode.push_back({SET_C, 0, 0, {}});
-			return true;
-		});
-	}
-
-	void optimizeScans() {
-		optimizeInnerLoops(__FUNCTION__, [](auto& info, auto, auto& newCode) {
-			if (!isScanLoop(info)) { return false; }
-			int scanJump = info.shift;
-			newCode.push_back({SCAN, 0, scanJump, {}});
-			return true;
-		});
-	}
-
-	void linearizeLoops() {
-		optimizeInnerLoops(__FUNCTION__, [&](auto&, auto code, auto& newCode) {
-			return linearTest(code, newCode);
-		});
 	}
 };

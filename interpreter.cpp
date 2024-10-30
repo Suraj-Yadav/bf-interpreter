@@ -169,6 +169,7 @@ auto run(std::span<Instruction> code) {
 				// 		}
 				// 		for (auto& e : right) { std::cout << (int)e << "\t"; }
 				// 		std::cout << '\n';
+				break;
 			}
 			case NO_OP:
 				break;
@@ -182,21 +183,12 @@ auto run(std::span<Instruction> code) {
 int main(int argc, char* argv[]) {
 	auto args = argparse(argc, argv);
 
-	if (args.input.empty()) {
-		std::cerr << "bf: fatal error: no input files\n";
-		return 1;
-	}
-
-	Program p(args.input);
+	Program p(args);
 
 	if (!p.isOK()) {
 		std::cerr << p.error() << "\n";
 		return 1;
 	}
-
-	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
-	if (args.optimizeScans) { p.optimizeScans(); }
-	if (args.linearizeLoops) { p.linearizeLoops(); }
 
 	auto& code = p.instructions();
 

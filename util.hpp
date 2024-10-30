@@ -37,7 +37,7 @@ struct Args {
 Args argparse(int argc, char* argv[]) {
 	Args a;
 	std::vector<std::string> args(argv + 1, argv + argc);
-	auto last = args.front();
+	std::string last;
 	for (auto& arg : args) {
 		if (arg == "-p") {
 			a.profile = true;

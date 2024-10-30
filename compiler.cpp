@@ -1,4 +1,6 @@
 #include <immintrin.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
 
 #include <filesystem>
 
@@ -17,7 +19,8 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 	if (jump == 0) { return; }
 
 	// For large jump, normal scan works fine
-	if (jump <= -16 || jump >= 16) {
+	constexpr auto LARGE_JUMP = 16;
+	if (std::abs(jump) >= LARGE_JUMP) {
 		print(output, "	add rbx, %", -jump);
 		print(output, ".SCAN_START%:", loc);
 		print(output, "	add rbx, %", jump);
@@ -35,7 +38,7 @@ void scan(std::ofstream& output, const Instruction& inst, auto loc = 0u) {
 	__mmask64 mask = 0;
 	for (auto i = 0u; i < VEC_SZ; i += jump) { mask = mask | 1ULL << i; }
 
-	const auto shift = jump - static_cast<int>(VEC_SZ) % jump;
+	const auto shift = jump - (static_cast<int>(VEC_SZ) % jump);
 
 	if (isNeg) { mask = revBits(mask); }
 
@@ -234,21 +237,19 @@ main:
 int main(int argc, char* argv[]) {
 	auto args = argparse(argc, argv);
 
-	if (args.input.empty()) {
-		std::cerr << "bfc: fatal error: no input files\n";
-		return 1;
-	}
+	// Open a new context and module.
+	auto TheContext = std::make_unique<llvm::LLVMContext>();
+	auto TheModule = std::make_unique<llvm::Module>("my cool jit", *TheContext);
 
-	Program p(args.input);
+	// Create a new builder for the module.
+	auto Builder = std::make_unique<llvm::IRBuilder<>>(*TheContext);
+
+	Program p(args);
 
 	if (!p.isOK()) {
 		std::cerr << p.error() << "\n";
 		return 1;
 	}
-
-	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
-	if (args.optimizeScans) { p.optimizeScans(); }
-	if (args.linearizeLoops) { p.linearizeLoops(); }
 
 	auto outputPath =
 		std::filesystem::temp_directory_path() / "tmp-bf-assembly.s";
