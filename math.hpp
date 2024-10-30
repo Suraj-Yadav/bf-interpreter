@@ -1,3 +1,5 @@
+#pragma once
+
 #include <gmpxx.h>
 
 #include <cassert>
@@ -47,8 +49,8 @@ std::ostream& operator<<(std::ostream& os, const Matrix& m) {
 
 enum GaussianResult {
 	ONE_SOLUTION = 0,
-	MANY_SOLUTIONS,	// Tape Movement
-	NO_SOLUTION,	// Increment by product of constant and reference
+	MANY_SOLUTIONS,	 // Tape Movement
+	NO_SOLUTION,	 // Increment by product of constant and reference
 };
 std::pair<GaussianResult, Matrix> gaussian(Matrix A, Matrix b) {
 	assert(A.rows() == b.rows());
