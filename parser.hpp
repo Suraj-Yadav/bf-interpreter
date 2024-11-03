@@ -17,7 +17,7 @@
 
 using DATA_TYPE = unsigned char;
 
-enum Inst_Codes {
+enum Inst_Codes : std::int8_t {
 	NO_OP = 0,
 	TAPE_M,	 // Tape Movement
 	INCR,	 // Increment by product of constant and reference
@@ -43,25 +43,34 @@ struct Instruction {
 Instruction getInstruction(char ch) {
 	switch (ch) {
 		case '>':
-			return {Inst_Codes::TAPE_M, 0, +1, {}};
+			return {
+				.code = Inst_Codes::TAPE_M, .lRef = 0, .value = +1, .rRef = {}};
 		case '<':
-			return {Inst_Codes::TAPE_M, 0, -1, {}};
+			return {
+				.code = Inst_Codes::TAPE_M, .lRef = 0, .value = -1, .rRef = {}};
 		case '+':
-			return {Inst_Codes::INCR, 0, +1, {}};
+			return {
+				.code = Inst_Codes::INCR, .lRef = 0, .value = +1, .rRef = {}};
 		case '-':
-			return {Inst_Codes::INCR, 0, -1, {}};
+			return {
+				.code = Inst_Codes::INCR, .lRef = 0, .value = -1, .rRef = {}};
 		case '.':
-			return {Inst_Codes::WRITE, 0, 0, {}};
+			return {
+				.code = Inst_Codes::WRITE, .lRef = 0, .value = 0, .rRef = {}};
 		case ',':
-			return {Inst_Codes::READ, 0, 0, {}};
+			return {
+				.code = Inst_Codes::READ, .lRef = 0, .value = 0, .rRef = {}};
 		case '[':
-			return {Inst_Codes::JUMP_C, 0, 0, {}};
+			return {
+				.code = Inst_Codes::JUMP_C, .lRef = 0, .value = 0, .rRef = {}};
 		case ']':
-			return {Inst_Codes::JUMP_O, 0, 0, {}};
+			return {
+				.code = Inst_Codes::JUMP_O, .lRef = 0, .value = 0, .rRef = {}};
 		case '$':
-			return {Inst_Codes::DEBUG, 0, 0, {}};
+			return {
+				.code = Inst_Codes::DEBUG, .lRef = 0, .value = 0, .rRef = {}};
 	}
-	return {Inst_Codes::NO_OP, 0, 0, {}};
+	return {.code = Inst_Codes::NO_OP, .lRef = 0, .value = 0, .rRef = {}};
 }
 
 // #define LOG_INST 1
@@ -254,7 +263,7 @@ auto solve(
 	const std::set<int>& variables) {
 	Matrix x(0, 0);
 
-	if (terms.size() > VARIABLE_LIMIT || terms.size() <= 0) { return x; }
+	if (terms.size() > VARIABLE_LIMIT || terms.empty()) { return x; }
 	const int N = static_cast<int>(terms.size()),
 			  M = static_cast<int>(variables.size()), S = N + 1;
 
@@ -510,8 +519,7 @@ class Program {
 
 	int getProgramToCode(int pos) {
 		return static_cast<int>(
-			std::lower_bound(srcToProgram.begin(), srcToProgram.end(), pos) -
-			srcToProgram.begin());
+			std::ranges::lower_bound(srcToProgram, pos) - srcToProgram.begin());
 	}
 
 	void parse(const Args& args) {
@@ -537,7 +545,11 @@ class Program {
 			if (input.get(ch)) {
 				inst = getInstruction(ch);
 			} else {
-				inst = {Inst_Codes::HALT, 0, 0, {}};
+				inst = {
+					.code = Inst_Codes::HALT,
+					.lRef = 0,
+					.value = 0,
+					.rRef = {}};
 			}
 
 			if (inst.code != NO_OP) {
@@ -546,8 +558,6 @@ class Program {
 				original << inst << "\n";
 #endif
 				aggregate();
-			} else {
-				ch = '\0';
 			}
 
 			srcToProgram.push_back(static_cast<int>(program.size() - 1));
@@ -578,11 +588,11 @@ class Program {
 
 	void printLoops(
 		const std::string& title, std::vector<std::pair<int, int>>& loops) {
-		std::sort(loops.begin(), loops.end(), std::greater<>());
+		std::ranges::sort(loops, std::greater<>());
 
 		const auto H_BAR = 80u;
 
-		if (loops.size() > 0) {
+		if (!loops.empty()) {
 			auto left = (H_BAR - title.size()) / 2;
 			auto right = H_BAR - left - title.size();
 			std::cout << '\n'

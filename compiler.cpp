@@ -268,7 +268,7 @@ namespace llvm {
 		std::map<int, Value*> locks;
 		std::vector<BasicBlock*> blocks;
 
-		auto constant(int value, IntegerType* type) {
+		static auto constant(int value, IntegerType* type) {
 			return ConstantInt::get(type, value);
 		}
 
@@ -416,7 +416,7 @@ namespace llvm {
 					after("/tmp/after-IR-opt.ll", ec);
 
 				module->print(before, nullptr);
-				// optimize();
+				optimize();
 				module->print(after, nullptr);
 			}
 			auto TargetTriple = sys::getDefaultTargetTriple();
@@ -524,7 +524,7 @@ namespace llvm {
 int main(int argc, char* argv[]) {
 	llvm::InitLLVM(argc, argv);
 	auto args = argparse(argc, argv);
-
+	args.optimizeScans = false;
 	Program p(args);
 
 	if (!p.isOK()) {

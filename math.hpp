@@ -3,6 +3,7 @@
 #include <gmpxx.h>
 
 #include <cassert>
+#include <cstdint>
 #include <ostream>
 #include <vector>
 
@@ -18,7 +19,8 @@ class Matrix {
 	[[nodiscard]] auto rows() const { return mat.size(); }
 	[[nodiscard]] auto cols() const { return mat[0].size(); }
 	[[nodiscard]] auto isRowZero(size_t row) {
-		return std::ranges::all_of(mat[row], [](auto i) { return i == 0; });
+		return std::ranges::all_of(
+			mat[row], [](const auto& i) { return i == 0; });
 	}
 
 	std::vector<D>& operator[](size_t row) { return mat[row]; }
@@ -47,7 +49,7 @@ std::ostream& operator<<(std::ostream& os, const Matrix& m) {
 	return os;
 }
 
-enum GaussianResult {
+enum GaussianResult : std::uint8_t {
 	ONE_SOLUTION = 0,
 	MANY_SOLUTIONS,	 // Tape Movement
 	NO_SOLUTION,	 // Increment by product of constant and reference
