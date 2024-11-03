@@ -1,6 +1,13 @@
 {
-  "dependencies": [
-    "gmp",
-    "llvm"
-  ]
+    "dependencies": [
+        "gmp",
+        {
+            "name": "llvm",
+            "features": [
+                "enable-assertions",
+                "enable-eh",
+                "enable-rtti"
+            ]
+        }
+    ]
 }

@@ -29,7 +29,7 @@ int main() {
 	debug("a = %", a);
 	debug("b = %", b);
 	auto x = gaussian(a, b);
-	print(std::cout, "x = %", x);
+	print(std::cout, "x = %", x.first);
 
 	// auto x = solve(a, b);
 	return 0;
