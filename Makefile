@@ -9,7 +9,7 @@ test: build
 
 .PHONY: build
 
-test_big: test
+test_big: build 
 	@echo 'Compiler'
 	@cd ../bfcheck/ && time ./bfcheck.pl 
 	@sed -i 's/run2($$f)/run1($$f)/' ./../bfcheck/bfcheck.pl

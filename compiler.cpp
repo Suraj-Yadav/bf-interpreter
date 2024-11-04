@@ -325,6 +325,16 @@ namespace llvm {
 							{builder.CreateZExt(
 								loadCell(cellAddr(0)), Tint32)});
 						break;
+					case READ:
+						storeCell(
+							cellAddr(0),
+							builder.CreateTrunc(
+								builder.CreateCall(
+									module->getFunction("getchar"), {}),
+								Tint8)
+
+						);
+						break;
 					case WRITE_LOCK:
 						if (locks.contains(i.lRef)) {
 							::print(
@@ -478,11 +488,15 @@ namespace llvm {
 		bool compile(
 			std::span<::Instruction> code, const std::filesystem::path& path) {
 			{
-				// Create declaration for putchar
-				auto* functionType =
-					llvm::FunctionType::get(Tint32, {Tint32}, false);
-				llvm::Function::Create(
-					functionType, llvm::Function::ExternalLinkage, "putchar",
+				// Create declaration for putchar and getchar
+				auto* functionType = FunctionType::get(Tint32, {Tint32}, false);
+				Function::Create(
+					functionType, Function::ExternalLinkage, "putchar",
+					module.get());
+
+				functionType = FunctionType::get(Tint32, false);
+				Function::Create(
+					functionType, Function::ExternalLinkage, "getchar",
 					module.get());
 			}
 
