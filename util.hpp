@@ -32,6 +32,7 @@ struct Args {
 	bool optimizeSimpleLoops = true;
 	bool optimizeScans = true;
 	bool linearizeLoops = true;
+	bool useLLVM = true;
 };
 
 Args argparse(int argc, char* argv[]) {
@@ -49,6 +50,8 @@ Args argparse(int argc, char* argv[]) {
 			a.optimizeScans = false;
 		} else if (arg == "--no-linearize-loop-optimize") {
 			a.linearizeLoops = false;
+		} else if (arg == "--no-llvm") {
+			a.useLLVM = false;
 		} else if (a.input.empty()) {
 			a.input = arg;
 		}

@@ -47,12 +47,12 @@ namespace manual {
 		const auto sign = isNeg ? -1 : 1;
 		if (isNeg) { jump = -jump; }
 		auto isPowerOf2 = (jump & (jump - 1)) == 0;
-		const auto VEC_SZ = 64;
-		__mmask64 mask = 0;
-		for (auto i = 0u; i < VEC_SZ; i += jump) { mask = mask | 1ULL << i; }
 
+		const auto VEC_SZ = 64;
 		const auto shift = jump - (static_cast<int>(VEC_SZ) % jump);
 
+		__mmask64 mask = 0;
+		for (auto i = 0u; i < VEC_SZ; i += jump) { mask = mask | 1ULL << i; }
 		if (isNeg) { mask = revBits(mask); }
 
 		print(output, "#Scan of %", sign * jump);
@@ -276,6 +276,11 @@ namespace llvm {
 			return static_cast<Value*>(builder.CreateLoad(Tint32, ptr));
 		}
 
+		void incrPtr(int x) {
+			auto* newValue = builder.CreateAdd(ptrValue(), constant(x, Tint32));
+			builder.CreateStore(newValue, ptr);
+		}
+
 		auto cellAddr(int x) {
 			auto* idx = builder.CreateAdd(ptrValue(), constant(x, Tint32));
 			auto* addr = builder.CreateGEP(Tint8, tape, {idx});
@@ -301,17 +306,158 @@ namespace llvm {
 			storeCell(addr, res);
 		}
 
+		void slowScan(int jump) {
+			auto* condBlock =
+				BasicBlock::Create(ctx, "", blocks.back()->getParent());
+			auto* loopBlock =
+				BasicBlock::Create(ctx, "", blocks.back()->getParent());
+			auto* endBlock =
+				BasicBlock::Create(ctx, "", blocks.back()->getParent());
+
+			builder.CreateBr(condBlock);
+			builder.SetInsertPoint(condBlock);
+			auto* cond = builder.CreateICmpNE(cell(0), constant(0, Tint8));
+			builder.CreateCondBr(cond, loopBlock, endBlock);
+
+			builder.SetInsertPoint(loopBlock);
+
+			incrPtr(jump);
+
+			builder.CreateBr(condBlock);
+
+			builder.SetInsertPoint(endBlock);
+		}
+
+		void fastScan(bool isPowerOf2, bool isNeg, int jump) {
+			const int VEC_SZ = 64;
+			const int shift = jump - (VEC_SZ % jump);
+			const int sign = isNeg ? -1 : 1;
+
+			auto* Tint1 = builder.getInt1Ty();
+			auto* Tvec = VectorType::get(Tint8, ElementCount::getFixed(VEC_SZ));
+
+			auto* Tmask = builder.getInt64Ty();
+			auto* TmaskV =
+				VectorType::get(Tint1, ElementCount::getFixed(VEC_SZ));
+
+			__mmask64 mask = 0;
+			{
+				for (auto i = 0u; i < VEC_SZ; i += jump) {
+					mask = mask | 1ULL << i;
+				}
+				if (isNeg) { mask = revBits(mask); }
+			}
+
+			auto* maskAddr =
+				builder.CreateAlloca(Tmask, constant(1, Tint32), "mask");
+			builder.CreateStore(
+				builder.CreateBitCast(ConstantInt::get(Tmask, mask), Tmask),
+				maskAddr);
+
+			if (isNeg) { incrPtr(-VEC_SZ + 1); }
+
+			auto* rhs = ConstantAggregateZero::get(Tvec);
+
+			auto* lhs = builder.CreateAlloca(Tvec, constant(1, Tint32), "lhs");
+
+			incrPtr(-sign * VEC_SZ);
+
+			auto* scanBlock =
+				BasicBlock::Create(ctx, "", blocks.back()->getParent());
+
+			builder.CreateBr(scanBlock);
+			builder.SetInsertPoint(scanBlock);
+
+			incrPtr(sign * VEC_SZ);
+			builder.CreateStore(
+				builder.CreateAlignedLoad(Tvec, cellAddr(0), tape->getAlign()),
+				lhs);
+
+			// Compare vector with zero vector
+			auto* cmp =
+				builder.CreateICmpEQ(builder.CreateLoad(Tvec, lhs), rhs);
+			// Filter elements with mask
+			cmp = builder.CreateBitCast(
+				builder.CreateAnd(
+					cmp, builder.CreateBitCast(
+							 builder.CreateLoad(Tmask, maskAddr), TmaskV)),
+				Tmask);
+
+			// Update mask for next iteration, not necessary it will happen
+			// though
+			if (!isPowerOf2) {
+				if (isNeg) {
+					auto* val = builder.CreateLoad(Tmask, maskAddr);
+					auto* a = builder.CreateLShr(val, constant(shift, Tmask));
+					auto* b =
+						builder.CreateShl(val, constant(jump - shift, Tmask));
+					auto* c = builder.CreateOr(a, b);
+					builder.CreateStore(c, maskAddr);
+				} else {
+					auto* val = builder.CreateLoad(Tmask, maskAddr);
+					auto* a = builder.CreateShl(val, constant(shift, Tmask));
+					auto* b =
+						builder.CreateLShr(val, constant(jump - shift, Tmask));
+					auto* c = builder.CreateOr(a, b);
+					builder.CreateStore(c, maskAddr);
+				}
+			}
+
+			auto* condBlock =
+				BasicBlock::Create(ctx, "", blocks.back()->getParent());
+			auto* endBlock =
+				BasicBlock::Create(ctx, "", blocks.back()->getParent());
+
+			builder.CreateBr(condBlock);
+			builder.SetInsertPoint(condBlock);
+			auto* cond = builder.CreateICmpEQ(cmp, constant(0, Tmask));
+			builder.CreateCondBr(cond, scanBlock, endBlock);
+
+			builder.SetInsertPoint(endBlock);
+
+			auto* func = Intrinsic::getDeclaration(
+				module.get(), isNeg ? Intrinsic::ctlz : Intrinsic::cttz,
+				{Tmask});
+			Value* res =
+				builder.CreateCall(func, {cmp, builder.getInt1(false)});
+			res = builder.CreateTrunc(res, Tint32);
+
+			Value* ptrVal = builder.CreateLoad(Tint32, ptr);
+
+			if (isNeg) {
+				ptrVal =
+					builder.CreateAdd(ptrVal, constant(VEC_SZ - 1, Tint32));
+				ptrVal = builder.CreateSub(ptrVal, res);
+			} else {
+				ptrVal = builder.CreateAdd(ptrVal, res);
+			}
+			builder.CreateStore(ptrVal, ptr);
+		}
+
+		void scan(const ::Instruction& i) {
+			constexpr auto LARGE_JUMP = 16;
+			auto jump = i.value;
+
+			if (std::abs(jump) >= LARGE_JUMP) {
+				slowScan(jump);
+				return;
+			}
+			auto isNeg = jump < 0;
+			if (isNeg) { jump = -jump; }
+			auto isPowerOf2 = (jump & (jump - 1)) == 0;
+
+			fastScan(isPowerOf2, isNeg, jump);
+		}
+
 		bool compile(std::span<::Instruction> code) {
 			for (const auto& i : code) {
 				switch (i.code) {
 					case NO_OP:
 						break;
-					case TAPE_M: {
-						auto* newValue = builder.CreateAdd(
-							ptrValue(), constant(i.value, Tint32));
-						builder.CreateStore(newValue, ptr);
+					case TAPE_M:
+						incrPtr(i.value);
 						break;
-					}
+
 					case SET_C:
 						storeCell(cellAddr(i.lRef), constant(i.value, Tint8));
 						break;
@@ -383,6 +529,15 @@ namespace llvm {
 						blocks.pop_back();
 						break;
 					}
+					case DEBUG:
+						break;
+
+					case HALT:
+						break;
+
+					case SCAN:
+						scan(i);
+						break;
 				}
 			}
 			return true;
@@ -420,15 +575,14 @@ namespace llvm {
 		}
 
 		bool object(const std::filesystem::path& path) {
+			optimize();
+#ifdef LOG_INST
 			{
 				std::error_code ec;
-				raw_fd_ostream before("/tmp/before-IR-opt.ll", ec),
-					after("/tmp/after-IR-opt.ll", ec);
-
-				module->print(before, nullptr);
-				optimize();
+				raw_fd_ostream after("/tmp/after-IR-opt.ll", ec);
 				module->print(after, nullptr);
 			}
+#endif
 			auto TargetTriple = sys::getDefaultTargetTriple();
 			InitializeAllTargetInfos();
 			InitializeAllTargets();
@@ -510,21 +664,29 @@ namespace llvm {
 
 			blocks.push_back(body);
 
-			tape = builder.CreateAlloca(Tint8, constant(TAPE_LENGTH, Tint32));
+			tape = builder.CreateAlloca(
+				Tint8, constant(TAPE_LENGTH, Tint32), "tape");
 			builder.CreateMemSet(
 				builder.CreateGEP(Tint8, tape, {constant(0, Tint32)}),
 				constant(0, Tint8), constant(TAPE_LENGTH, Tint32),
 				tape->getAlign());
 
 			{
-				ptr = builder.CreateAlloca(Tint32, constant(1, Tint32));
-				// auto* addr = builder.CreateGEP(Tint32, ptr, {constant(0)});
+				ptr = builder.CreateAlloca(Tint32, constant(1, Tint32), "ptr");
 				builder.CreateStore(constant(TAPE_LENGTH / 2, Tint32), ptr);
 			}
 
 			auto result = compile(code);
 			// auto result = true;
 			builder.CreateRet(constant(0, Tint32));
+
+#ifdef LOG_INST
+			{
+				std::error_code ec;
+				raw_fd_ostream before("/tmp/before-IR-opt.ll", ec);
+				module->print(before, nullptr);
+			}
+#endif
 
 			return result && !verifyModule(*module, &llvm::errs()) &&
 				   object(path);
@@ -533,12 +695,16 @@ namespace llvm {
 		void print() { module->print(llvm::errs(), nullptr); }
 	};
 
+	bool compile(
+		std::span<::Instruction> code, const std::filesystem::path& path) {
+		Compiler compiler;
+		return compiler.compile(code, path);
+	}
 }  // namespace llvm
 
 int main(int argc, char* argv[]) {
 	llvm::InitLLVM(argc, argv);
 	auto args = argparse(argc, argv);
-	args.optimizeScans = false;
 	Program p(args);
 
 	if (!p.isOK()) {
@@ -549,21 +715,28 @@ int main(int argc, char* argv[]) {
 	auto outputPath =
 		std::filesystem::temp_directory_path() / "tmp-bf-object.o";
 
-	llvm::Compiler compiler;
-	if (compiler.compile(p.instructions(), outputPath)) {
-		// compiler.print();
+	auto compiled = false;
+	if (args.useLLVM) {
+		compiled = llvm::compile(p.instructions(), outputPath);
 	} else {
-		std::cerr << "Unable to generate LLVM IR\n";
+		outputPath.replace_extension(".s");
+		compiled = manual::compile(p.instructions(), outputPath);
+	}
+	if (!compiled) {
+		print(
+			std::cerr, "Unable to generate %",
+			args.useLLVM ? "LLVM IR" : "assembly");
+		std::filesystem::remove(outputPath);
 		return 1;
 	}
-	// manual::compile(p.instructions(), outputPath);
+
 	auto command = "g++ -g " + outputPath.string();
 	if (!args.output.empty()) { command += " -o " + args.output.string(); }
 
 	auto retCode = std::system(command.c_str());
 
 	if (retCode == 0) {
-		// std::filesystem::remove(outputPath);
+		std::filesystem::remove(outputPath);
 		return 0;
 	}
 	std::cerr << "Bug in compiler\n";
