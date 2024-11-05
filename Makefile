@@ -19,13 +19,13 @@ test_big: build
 
 bench: build
 	@echo 'Compiler'
-	for i in benches/ma*.b; do \
+	for i in benches/*.b; do \
 		hyperfine --warmup 10 \
-		--parameter-list loop --no-linearize-loop-optimize, \
-		--prepare "./build/bfc {loop} $$i" \
+		--parameter-list loop --no-llvm, \
 		--command-name="$(basename $$i) {loop}" \
 		--export-markdown=- --time-unit=millisecond \
 		--shell=none \
+		--setup "./build/bfc {loop} $$i" \
 		'./a.out'; \
 	done
 

@@ -600,7 +600,7 @@ namespace llvm {
 			}
 
 			const auto* CPU = "generic";
-			const auto* Features = "";
+			const auto* Features = "+avx512bw";
 
 			TargetOptions opt;
 			auto targetMachine =

@@ -16,7 +16,7 @@ target_compile_options(core INTERFACE -mavx512bw)
 target_link_options(core INTERFACE -fsanitize=address,undefined)
 
 add_executable(bfc compiler.cpp)
-target_compile_options(bfc PRIVATE -g)
+target_compile_options(bfc PRIVATE -Ofast)
 add_executable(bfi interpreter.cpp)
 target_compile_options(bfi PRIVATE -Ofast)
 
