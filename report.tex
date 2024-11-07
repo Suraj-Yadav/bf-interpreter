@@ -12,7 +12,7 @@
 
 \setlength{\parindent}{0cm}
 
-\title{Assignment 9 More Loop Optimisations: Option 2}
+\title{Assignment 10 BF $\rightarrow$ LLVM}
 \author{Suraj Yadav (u1472115)}
 
 \begin{document}
@@ -20,79 +20,48 @@
 \section{Link}
 \url{https://github.com/Suraj-Yadav/bf-interpreter}
 \section{Benchmarks}
-The number next to filename with no flags indicate the number of times the optimization fired.
 \begin{table}[H]
-	\raggedright
-	\begin{tabular}{|l|l|l|l|l|}
-		\hline
-		\textbf{Flags}                                       & \textbf{Mean [ms]} & \textbf{Min [ms]} & \textbf{Max [ms]} & \textbf{Relative} \\ \hline
-		\texttt{bench.b --no-linearize-loop-optimize}        & 3.5 ± 0.7          & 2.0               & 4.8               & 1.34 ± 0.32       \\ \hline
-		\texttt{bench.b} (1)                                 & 2.6 ± 0.4          & 1.6               & 3.3               & 1.00              \\ \hline
-		\hline
-		\texttt{bottles.b --no-linearize-loop-optimize}      & 2.6 ± 0.5          & 1.5               & 3.8               & 1.24 ± 0.39       \\ \hline
-		\texttt{bottles.b} (6)                               & 2.1 ± 0.5          & 1.2               & 3.1               & 1.00              \\ \hline
-		\hline
-		\texttt{deadcodetest.b --no-linearize-loop-optimize} & 2.4 ± 0.6          & 1.2               & 3.5               & 1.00              \\ \hline
-		\texttt{deadcodetest.b} (0)                          & 2.4 ± 0.6          & 1.4               & 3.7               & 1.01 ± 0.34       \\ \hline
-		\hline
-		\texttt{hanoi.b --no-linearize-loop-optimize}        & 40.4 ± 0.9         & 38.2              & 41.7              & 10.86 ± 1.60      \\ \hline
-		\texttt{hanoi.b} (3)                                 & 3.7 ± 0.5          & 3.1               & 4.8               & 1.00              \\ \hline
-		\hline
-		\texttt{hello.b --no-linearize-loop-optimize}        & 1.6 ± 0.3          & 1.1               & 2.4               & 1.00              \\ \hline
-		\texttt{hello.b} (0)                                 & 1.7 ± 0.4          & 1.0               & 3.1               & 1.06 ± 0.30       \\ \hline
-		\hline
-		\texttt{long.b --no-linearize-loop-optimize}         & 150.5 ± 6.4        & 141.1             & 161.7             & 11.11 ± 1.00      \\ \hline
-		\texttt{long.b} (1)                                  & 13.5 ± 1.1         & 11.8              & 17.4              & 1.00              \\ \hline
-		\hline
-		\texttt{loopremove.b --no-linearize-loop-optimize}   & 1.6 ± 0.3          & 1.1               & 2.7               & 1.03 ± 0.28       \\ \hline
-		\texttt{loopremove.b} (0)                            & 1.6 ± 0.3          & 1.1               & 2.3               & 1.00              \\ \hline
-		\hline
-		\texttt{mandel.b --no-linearize-loop-optimize}       & 410.3 ± 6.9        & 398.6             & 420.2             & 1.00              \\ \hline
-		\texttt{mandel.b} (20)                               & 413.9 ± 25.2       & 388.6             & 455.6             & 1.01 ± 0.06       \\
-		\hline
-		\texttt{serptri.b --no-linearize-loop-optimize}      & 1.7 ± 0.3          & 1.2               & 2.4               & 1.00 ± 0.26       \\ \hline
-		\texttt{serptri.b} (0)                               & 1.7 ± 0.3          & 1.1               & 2.5               & 1.00              \\ \hline
-		\hline
-		\texttt{twinkle.b --no-linearize-loop-optimize}      & 1.7 ± 0.3          & 1.1               & 2.4               & 1.00              \\ \hline
-		\texttt{twinkle.b} (0)                               & 1.7 ± 0.2          & 1.2               & 2.2               & 1.01 ± 0.22       \\ \hline
-	\end{tabular}
+  \raggedright
+  \begin{tabular}{|l|l|l|l|l|l|}
+    \hline
+    \textbf{Flags}                    & \textbf{Mean [ms]} & \textbf{Min [ms]} & \textbf{Max [ms]} & \textbf{Relative} & \textbf{Runs}\\ \hline
+    \texttt{bench.b --no-llvm}        & 1.5 ± 0.4          & 0.7               & 3.6               & 1.07 ± 0.44       & 1987\\ \hline
+    \texttt{bench.b}                  & 1.4 ± 0.4          & 0.7               & 3.2               & 1.00              & 1554\\ \hline\hline
+    \texttt{bottles.b --no-llvm}      & 1.5 ± 0.4          & 0.8               & 3.5               & 1.08 ± 0.41       & 1568\\ \hline
+    \texttt{bottles.b}                & 1.4 ± 0.4          & 0.7               & 3.1               & 1.00              & 2128\\ \hline\hline
+    \texttt{deadcodetest.b --no-llvm} & 1.3 ± 0.4          & 0.7               & 3.1               & 1.01 ± 0.38       & 1566\\ \hline
+    \texttt{deadcodetest.b}           & 1.3 ± 0.4          & 0.7               & 3.2               & 1.00              & 1530\\ \hline\hline
+    \texttt{hanoi.b --no-llvm}        & 3.9 ± 0.6          & 2.5               & 6.3               & 1.58 ± 0.41       & 890\\ \hline
+    \texttt{hanoi.b}                  & 2.5 ± 0.5          & 1.5               & 4.7               & 1.00              & 1192\\ \hline\hline
+    \texttt{hello.b --no-llvm}        & 1.3 ± 0.3          & 0.7               & 3.2               & 1.00              & 2769\\ \hline
+    \texttt{hello.b}                  & 1.3 ± 0.3          & 0.7               & 3.0               & 1.00 ± 0.37       & 1987\\ \hline\hline
+    \texttt{long.b --no-llvm}         & 14.7 ± 0.8         & 12.6              & 16.8              & 1.40 ± 0.13       & 202\\ \hline
+    \texttt{long.b}                   & 10.5 ± 0.8         & 8.5               & 12.7              & 1.00              & 267\\ \hline\hline
+    \texttt{loopremove.b --no-llvm}   & 1.3 ± 0.3          & 0.7               & 3.1               & 1.00              & 1700\\ \hline
+    \texttt{loopremove.b}             & 1.8 ± 0.4          & 1.0               & 3.9               & 1.43 ± 0.50       & 1739\\ \hline\hline
+    \texttt{mandel.b --no-llvm}       & 433.1 ± 1.9        & 429.9             & 435.9             & 1.08 ± 0.01       & 10\\ \hline
+    \texttt{mandel.b}                 & 400.1 ± 2.3        & 396.2             & 404.0             & 1.00              & 10\\ \hline\hline
+    \texttt{serptri.b --no-llvm}      & 1.3 ± 0.3          & 0.7               & 3.2               & 1.00              & 2048\\ \hline
+    \texttt{serptri.b}                & 1.9 ± 0.4          & 1.0               & 4.0               & 1.51 ± 0.54       & 1932\\ \hline\hline
+    \texttt{twinkle.b --no-llvm}      & 1.3 ± 0.3          & 0.7               & 3.1               & 1.00 ± 0.35       & 2383\\ \hline
+    \texttt{twinkle.b}                & 1.3 ± 0.3          & 0.7               & 3.1               & 1.00              & 2116\\ \hline
+  \end{tabular}
 \end{table}
 
-The best cases are for hanoi and long showing $\sim10x$ speedup.
-
-Mandel has the most optimizations, but the time is approximately the same.
-
-dbfi, cbfi and Sudoku didn't fire any of the optimization, so they can't be optimized by this.
-
+\pagebreak
 \section{Implementation Details}
-\subsection{Solving Linear System}
-I implemented a very simple Matrix class whose cells are of type $\mathbb{Q}$ (Rational Number). For this I used \texttt{mpq\_class} from GMP (GNU Multiple Precision Arithmetic Library). \texttt{mpq\_class} stores a rational number as numerator and denominator using arbitrary precision integers. Keeping cells as \texttt{mpq\_class} side steps any floating point or overflow errors.
-
-The solver takes matrix $A$ and $b$ as input for the equation $Ax = b$ and solves them using Gaussian Elimination.
-
-\subsection{Linearizing Loop Body}
-After determining what all product terms (say $n$) need to be used for a loop body, I generate $n+1$ equations using random values for cells and pass them to the solver. If the solver returns \texttt{MANY\_SOLUTIONS}, I try again with a different random configuration. Finally I would either get \texttt{NO\_SOLUTION} or \texttt{ONE\_SOLUTION}.
-
-Since I use arbitrary precision fractions, it is possible that the solution involves fractions or integers outside (\texttt{INT\_MIN, INT\_MAX}). In both these cases, the loop is not linearized. I checked that none of the benchmark programs encountered this case, so I choose not to implement this.
-
-\subsection{Generating Instructions}
-My IR implements increment by separating increments as sum of products. So \texttt{z += 1+2*w+3*w*x} is represented as three separate instructions \texttt{z += 1; z += 2*w; z += 3*w*x}. This posed a bunch of problems when representing linearized loops.
-
-Let us assume this was the output of linearized loop
-
-\texttt{w = 0, x = x + w + z, y = x + y, z = 3*z + 2*w*z + 2*w*y}
-
-Problem 1: If changes for z are represented as \texttt{z += 2*z; z += 2*w*z; z += 2*w*y}, then the second statement will evaluate incorrect result as \texttt{z} would have changed. In this case all order will fail. I could have implemented an single increment instruction to represent a sum of products but that wouldn't solve problem 2.
-
-Problem 2: If changes for \texttt{w} are made first, all the all other expressions will evaluate incorrectly. An order of evaluation can be found but that only works if dependencies form a DAG, which is not the case in this example. What we need is a way to evaluate all RHS and then update LHS.
-
-To implement this I added two instructions to my IR.
 \begin{itemize}
-	\item \texttt{WRITE\_LOCK(i)}: Allocate a new variable (not on tape) and assign it the value of cell \texttt{i}. All further updates to cell \texttt{i} should be done on this new variable. Reads are still performed using value from cell \texttt{i}.
-	\item \texttt{WRITE\_UNLOCK(i)}: Set cell \texttt{i} = value of its corresponding new variable and deallocate the variable. All further updates to cell \texttt{i} should be done on cell \texttt{i}.
+  \item A \texttt{main} function is created inside LLVM module and all instructions are exported inside this main function. This module is converted to an object file which is then converted to executable.
+  \item The tape is declared as a local variable inside \texttt{main} and is memset to 0.
+  \item IR is optimized using an O3 pass by using a pass manager.
+  \item Vector Scan is hardcoded for AVX512.
 \end{itemize}
 
-Both problems are solved by generating lock instructions before update instructions and unlock instructions after update instructions for all involved cells.
-
+\section{Remarks}
+\begin{itemize}
+  \item \texttt{bench.b, deadcodetest.b} and \texttt{hello.b} were completely reduced to putchar statements.
+  \item \texttt{bottles.b} and \texttt{twinkle.b} too had large sections of putchar statements mixed with some loops.
+  \item  The compiler generated with Debug build of LLVM with assertions was quite slow. For hanoi it took around a minute for compilation. After all development was done, I switched to a Release build of LLVM with no assertions.
+\end{itemize}
 
 \end{document}

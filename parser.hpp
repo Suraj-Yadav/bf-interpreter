@@ -16,6 +16,7 @@
 #include "util.hpp"
 
 using DATA_TYPE = unsigned char;
+// #define LOG_INST 1
 
 enum Inst_Codes : std::int8_t {
 	NO_OP = 0,
@@ -72,8 +73,6 @@ Instruction getInstruction(char ch) {
 	}
 	return {.code = Inst_Codes::NO_OP, .lRef = 0, .value = 0, .rRef = {}};
 }
-
-// #define LOG_INST 1
 
 std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 	switch (a.code) {
