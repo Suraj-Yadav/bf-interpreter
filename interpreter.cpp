@@ -26,10 +26,10 @@ auto maskFromJump(int jump) {
 template <bool isPowerOf2, bool isJumpNegative>
 int fastScan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 	auto i = 0;
-	const auto* ptr = (const VEC*)(&tape[BASE]);
+	const auto* ptr = reinterpret_cast<const VEC*>(&tape[BASE]);
 
 	if constexpr (isJumpNegative) {
-		ptr = (const VEC*)(&tape[BASE - VEC_SZ + 1]);
+		ptr = reinterpret_cast<const VEC*>(&tape[BASE - VEC_SZ + 1]);
 	}
 
 	// generate a mask marking elements visited by jump
@@ -79,7 +79,8 @@ int scan(const std::vector<DATA_TYPE>& tape, int BASE, int jump) {
 	if (jump == 0) {
 		if (tape[BASE] == 0) { return 0; }
 	}
-	if (jump <= -16 || jump >= 16) { return slowScan(tape, BASE, jump); }
+	constexpr auto LARGE_JUMP = 16;
+	if (std::abs(jump) >= LARGE_JUMP) { return slowScan(tape, BASE, jump); }
 	auto isNeg = jump < 0;
 	if (isNeg) { jump = -jump; }
 	auto isPowerOf2 = (jump & (jump - 1)) == 0;
@@ -159,8 +160,7 @@ auto run(std::span<Instruction> code) {
 			}
 
 			case DEBUG: {
-				std::cout << "tape[" << ptr << "] = " << (int)tape[ptr]
-						  << std::endl;
+				std::cout << "tape[" << ptr << "] = " << (int)tape[ptr] << '\n';
 				// 		std::cout << "index = " << index << '\n';
 				// 		while (!left.empty()) {
 				// 			const auto& e = left.back();
@@ -169,6 +169,7 @@ auto run(std::span<Instruction> code) {
 				// 		}
 				// 		for (auto& e : right) { std::cout << (int)e << "\t"; }
 				// 		std::cout << '\n';
+				break;
 			}
 			case NO_OP:
 				break;
@@ -182,21 +183,12 @@ auto run(std::span<Instruction> code) {
 int main(int argc, char* argv[]) {
 	auto args = argparse(argc, argv);
 
-	if (args.input.empty()) {
-		std::cerr << "bf: fatal error: no input files\n";
-		return 1;
-	}
-
-	Program p(args.input);
+	Program p(args);
 
 	if (!p.isOK()) {
 		std::cerr << p.error() << "\n";
 		return 1;
 	}
-
-	if (args.optimizeSimpleLoops) { p.optimizeSimpleLoops(); }
-	if (args.optimizeScans) { p.optimizeScans(); }
-	if (args.linearizeLoops) { p.linearizeLoops(); }
 
 	auto& code = p.instructions();
 

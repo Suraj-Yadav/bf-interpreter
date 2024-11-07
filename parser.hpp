@@ -16,8 +16,9 @@
 #include "util.hpp"
 
 using DATA_TYPE = unsigned char;
+// #define LOG_INST 1
 
-enum Inst_Codes {
+enum Inst_Codes : std::int8_t {
 	NO_OP = 0,
 	TAPE_M,	 // Tape Movement
 	INCR,	 // Increment by product of constant and reference
@@ -43,28 +44,35 @@ struct Instruction {
 Instruction getInstruction(char ch) {
 	switch (ch) {
 		case '>':
-			return {Inst_Codes::TAPE_M, 0, +1, {}};
+			return {
+				.code = Inst_Codes::TAPE_M, .lRef = 0, .value = +1, .rRef = {}};
 		case '<':
-			return {Inst_Codes::TAPE_M, 0, -1, {}};
+			return {
+				.code = Inst_Codes::TAPE_M, .lRef = 0, .value = -1, .rRef = {}};
 		case '+':
-			return {Inst_Codes::INCR, 0, +1, {}};
+			return {
+				.code = Inst_Codes::INCR, .lRef = 0, .value = +1, .rRef = {}};
 		case '-':
-			return {Inst_Codes::INCR, 0, -1, {}};
+			return {
+				.code = Inst_Codes::INCR, .lRef = 0, .value = -1, .rRef = {}};
 		case '.':
-			return {Inst_Codes::WRITE, 0, 0, {}};
+			return {
+				.code = Inst_Codes::WRITE, .lRef = 0, .value = 0, .rRef = {}};
 		case ',':
-			return {Inst_Codes::READ, 0, 0, {}};
+			return {
+				.code = Inst_Codes::READ, .lRef = 0, .value = 0, .rRef = {}};
 		case '[':
-			return {Inst_Codes::JUMP_C, 0, 0, {}};
+			return {
+				.code = Inst_Codes::JUMP_C, .lRef = 0, .value = 0, .rRef = {}};
 		case ']':
-			return {Inst_Codes::JUMP_O, 0, 0, {}};
+			return {
+				.code = Inst_Codes::JUMP_O, .lRef = 0, .value = 0, .rRef = {}};
 		case '$':
-			return {Inst_Codes::DEBUG, 0, 0, {}};
+			return {
+				.code = Inst_Codes::DEBUG, .lRef = 0, .value = 0, .rRef = {}};
 	}
-	return {Inst_Codes::NO_OP, 0, 0, {}};
+	return {.code = Inst_Codes::NO_OP, .lRef = 0, .value = 0, .rRef = {}};
 }
-
-// #define LOG_INST 1
 
 std::ostream& operator<<(std::ostream& os, const Instruction& a) {
 	switch (a.code) {
@@ -254,7 +262,7 @@ auto solve(
 	const std::set<int>& variables) {
 	Matrix x(0, 0);
 
-	if (terms.size() > VARIABLE_LIMIT || terms.size() <= 0) { return x; }
+	if (terms.size() > VARIABLE_LIMIT || terms.empty()) { return x; }
 	const int N = static_cast<int>(terms.size()),
 			  M = static_cast<int>(variables.size()), S = N + 1;
 
@@ -510,14 +518,17 @@ class Program {
 
 	int getProgramToCode(int pos) {
 		return static_cast<int>(
-			std::lower_bound(srcToProgram.begin(), srcToProgram.end(), pos) -
-			srcToProgram.begin());
+			std::ranges::lower_bound(srcToProgram, pos) - srcToProgram.begin());
 	}
 
-	void parse(const std::string& file) {
-		std::ifstream input(file);
+	void parse(const Args& args) {
+		if (args.input.empty()) {
+			err = "fatal error: no input files";
+			return;
+		}
+		std::ifstream input(args.input);
 		if (!input.is_open()) {
-			err = "Cannot read file: '" + file + "'";
+			err = "cannot read file: '" + args.input.string() + "'";
 			return;
 		}
 		std::vector<int> stack;
@@ -533,7 +544,11 @@ class Program {
 			if (input.get(ch)) {
 				inst = getInstruction(ch);
 			} else {
-				inst = {Inst_Codes::HALT, 0, 0, {}};
+				inst = {
+					.code = Inst_Codes::HALT,
+					.lRef = 0,
+					.value = 0,
+					.rRef = {}};
 			}
 
 			if (inst.code != NO_OP) {
@@ -542,8 +557,6 @@ class Program {
 				original << inst << "\n";
 #endif
 				aggregate();
-			} else {
-				ch = '\0';
 			}
 
 			srcToProgram.push_back(static_cast<int>(program.size() - 1));
@@ -574,11 +587,11 @@ class Program {
 
 	void printLoops(
 		const std::string& title, std::vector<std::pair<int, int>>& loops) {
-		std::sort(loops.begin(), loops.end(), std::greater<>());
+		std::ranges::sort(loops, std::greater<>());
 
 		const auto H_BAR = 80u;
 
-		if (loops.size() > 0) {
+		if (!loops.empty()) {
 			auto left = (H_BAR - title.size()) / 2;
 			auto right = H_BAR - left - title.size();
 			std::cout << '\n'
@@ -608,8 +621,8 @@ class Program {
 		std::vector<Instruction> p, newCode;
 		std::vector<int> stack;
 
-		int count = 0;
 #ifdef LOG_INST
+		int count = 0;
 		std::ofstream before(std::string("/tmp/before-") + name + ".bfas");
 		std::ofstream after(std::string("/tmp/after-") + name + ".bfas");
 #endif
@@ -642,12 +655,11 @@ class Program {
 				print(after, "================%================", count);
 				for (auto& e : newCode) { print(after, "%", e); }
 				print(after, "================%================", count);
+				count++;
 #endif
 				p.erase(begin, end);
 				p.insert(p.end(), newCode.begin(), newCode.end());
 				newCode.clear();
-
-				count++;
 			}
 		}
 
@@ -659,16 +671,51 @@ class Program {
 		for (const auto& i : program) { optimized << i << "\n"; }
 #endif
 	}
+	void optimizeSimpleLoops() {
+		optimizeInnerLoops(__FUNCTION__, [](auto& info, auto, auto& newCode) {
+			if (!isSimpleLoop(info)) { return false; }
+			auto delta = info.delta;
+			int change = -delta[0];
+			delta.erase(0);
+			newCode.reserve(delta.size());
+			for (auto& e : delta) {
+				newCode.push_back({INCR, e.first, change * e.second, {0}});
+			}
+			newCode.push_back({SET_C, 0, 0, {}});
+			return true;
+		});
+	}
+
+	void optimizeScans() {
+		optimizeInnerLoops(__FUNCTION__, [](auto& info, auto, auto& newCode) {
+			if (!isScanLoop(info)) { return false; }
+			int scanJump = info.shift;
+			newCode.push_back({SCAN, 0, scanJump, {}});
+			return true;
+		});
+	}
+
+	void linearizeLoops() {
+		optimizeInnerLoops(__FUNCTION__, [&](auto&, auto code, auto& newCode) {
+			return linearTest(code, newCode);
+		});
+	}
 
    public:
-	Program(const std::string& file) {
-		parse(file);
+	[[nodiscard]] auto isOK() const { return !err.has_value(); }
+
+	Program(const Args& args) {
+		parse(args);
+		if (isOK()) {
+			if (args.optimizeSimpleLoops) { optimizeSimpleLoops(); }
+			if (args.optimizeScans) { optimizeScans(); }
+			if (args.linearizeLoops) { linearizeLoops(); }
+		}
 #ifdef LOG_INST
 		std::ofstream optimized("/tmp/actual.bfas");
 		for (const auto& i : program) { optimized << i << "\n"; }
 #endif
 	}
-	[[nodiscard]] auto isOK() const { return !err.has_value(); }
 	auto error() { return err.value(); }
 	auto& instructions() { return program; }
 
@@ -707,35 +754,5 @@ class Program {
 		printLoops("Simple Loops", simple);
 		printLoops("Scan Loops", scan);
 		printLoops("Non Simple Loops", notSimple);
-	}
-
-	void optimizeSimpleLoops() {
-		optimizeInnerLoops(__FUNCTION__, [](auto& info, auto, auto& newCode) {
-			if (!isSimpleLoop(info)) { return false; }
-			auto delta = info.delta;
-			int change = -delta[0];
-			delta.erase(0);
-			newCode.reserve(delta.size());
-			for (auto& e : delta) {
-				newCode.push_back({INCR, e.first, change * e.second, {0}});
-			}
-			newCode.push_back({SET_C, 0, 0, {}});
-			return true;
-		});
-	}
-
-	void optimizeScans() {
-		optimizeInnerLoops(__FUNCTION__, [](auto& info, auto, auto& newCode) {
-			if (!isScanLoop(info)) { return false; }
-			int scanJump = info.shift;
-			newCode.push_back({SCAN, 0, scanJump, {}});
-			return true;
-		});
-	}
-
-	void linearizeLoops() {
-		optimizeInnerLoops(__FUNCTION__, [&](auto&, auto code, auto& newCode) {
-			return linearTest(code, newCode);
-		});
 	}
 };
